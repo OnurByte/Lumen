@@ -1,0 +1,20 @@
+[package]
+name = "lumen-platform-kwai"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Native Rust Kwai GLOBAL (not Kuaishou) LIVE adapter: TCP framing, signatures, heartbeat, protobuf events"
+
+[dependencies]
+lumen-live = { path = "../lumen-live" }
+async-trait.workspace = true
+bytes.workspace = true
+prost.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+md-5 = "0.10"
+flate2 = "1"

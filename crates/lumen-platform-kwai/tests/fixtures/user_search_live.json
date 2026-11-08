@@ -1,0 +1,5 @@
+{"result":1,"users":[
+ {"user_name":"someone_else","kwai_id":"someone_else","is_living":false,"user_id":1,"liveInfo":null},
+ {"user_name":"Creator One","kwai_id":"creator_one","is_living":true,"user_id":150000001,
+  "liveInfo":{"liveStreamId":"Abc123LiveId","exp_tag":"1_a/2000_x","user":{"user_id":150000001,"user_name":"Creator One"}}}
+]}

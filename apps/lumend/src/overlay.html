@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Lumen</title>
+<style>
+  :root {
+    --ground: #000000; --gradient-to: #222222; --text: #ffffff; --muted: #b3b3b3;
+    --surface: #222222; --border: #404040; --side-a: #ffffff; --side-b: #ffffff;
+    --question: #ffffff; --font: "Nimbus Sans"; --topic: 60px; --caption: 55px; --name: 65px;
+    --r-card: 30px; --r-ctl: 20px; --dim: 0.55;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: transparent; }
+  body { font-family: var(--font), "Nimbus Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+         color: var(--text); -webkit-font-smoothing: antialiased; }
+  #frame { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--ground); }
+  .ground { position: absolute; inset: 0; }
+  .bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0;
+        transition: opacity 1s linear; }
+  .bg.on { opacity: 1; }
+  #veil { position: absolute; inset: 0; background: rgba(0,0,0,var(--dim)); display: none; }
+  #content { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 25px; padding-top: 135px; }
+  .card { margin: 0 40px; padding: 35px 45px; border-radius: var(--r-card); border: 2.5px solid var(--border); }
+  #topic-card { background: color-mix(in srgb, var(--surface) 86%, transparent); display: flex; flex-direction: column; gap: 15px; }
+  #topic-head { display: flex; justify-content: space-between; align-items: center; font-size: 33px; color: var(--muted); }
+  #topic-head b { font-weight: 700; }
+  #phase { font-weight: 700; color: var(--text); margin-right: 20px; }
+  #topic { font-size: var(--topic); line-height: 1.25; font-weight: 500; }
+  #hosts { display: flex; padding: 0 20px; }
+  .host { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 15px; transition: opacity .25s; }
+  .host.dim { opacity: .5; }
+  .portrait { border-radius: var(--r-card); border: 7.5px solid var(--border); overflow: hidden;
+              width: 385px; height: 385px; background: var(--surface); position: relative; }
+  .portrait img { position: absolute; left: -10px; top: -10px; width: 405px; height: 405px; object-fit: cover; }
+  .initial { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+             font-size: 160px; font-weight: 700; color: var(--muted); }
+  .name { font-size: var(--name); font-weight: 500; }
+  .side { padding: 8px 25px; border-radius: var(--r-ctl); font-size: 42px; font-weight: 700; }
+  .status { height: 60px; display: flex; align-items: center; gap: 15px; font-size: 38px; font-weight: 700; }
+  .status .dot { width: 25px; height: 25px; border-radius: 50%; }
+  .status.thinking { color: var(--muted); font-weight: 400; }
+  #question { margin: 0 40px; padding: 25px 40px; border-radius: var(--r-card); background: var(--question);
+              display: none; flex-direction: column; gap: 5px; }
+  #question .label { font-size: 32px; font-weight: 700; }
+  #question .text { font-size: 48px; line-height: 1.3; font-weight: 700; }
+  #caption { display: none; flex-direction: column; gap: 10px; background: rgba(0,0,0,.82); }
+  #caption .who { font-size: 40px; font-weight: 700; }
+  #caption .text { font-size: var(--caption); line-height: 1.3; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="frame">
+  <div class="ground" id="ground"><img class="bg" id="bg0" alt=""><img class="bg" id="bg1" alt=""><div id="veil"></div></div>
+  <div id="content">
+    <div class="card" id="topic-card">
+      <div id="topic-head"><b id="brand">HAKİKAT ARAYIŞI</b><span><span id="phase"></span><span id="next"></span></span></div>
+      <div id="topic">Birazdan başlıyoruz</div>
+    </div>
+    <div id="hosts"></div>
+    <div id="question"><div class="label">İZLEYİCİ SORUYOR</div><div class="text"></div></div>
+    <div class="card" id="caption"><div class="who"></div><div class="text"></div></div>
+  </div>
+</div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const started = performance.now();
+let state = null, hostEls = [], bgIndex = -1, bgFront = 0;
+
+function luminance(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || ""); if (!m) return 1;
+  const n = parseInt(m[1], 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+const on = (hex) => (luminance(hex) > 0.55 ? "#000000" : "#ffffff");
+
+function applyTheme(t) {
+  const css = document.documentElement.style, px = (v, d) => ((v ?? d) * 2.5) + "px";
+  const set = (k, v) => { if (v !== undefined) css.setProperty(k, v); };
+  set("--ground", t.ground); set("--gradient-to", t.gradient_to); set("--text", t.text);
+  set("--muted", t.muted); set("--surface", t.surface); set("--border", t.border);
+  set("--side-a", t.side_a); set("--side-b", t.side_b); set("--question", t.question);
+  if (t.font) css.setProperty("--font", JSON.stringify(t.font));
+  css.setProperty("--topic", px(t.topic_size, 24)); css.setProperty("--caption", px(t.caption_size, 22));
+  css.setProperty("--name", px(t.name_size, 26)); css.setProperty("--r-card", px(t.radius_card, 12));
+  css.setProperty("--r-ctl", px(t.radius_control, 8)); css.setProperty("--dim", t.image_dim ?? 0.55);
+  const mode = t.background || "solid", ground = $("ground");
+  ground.style.background = mode === "gradient"
+    ? "linear-gradient(180deg, var(--ground), var(--gradient-to))" : "var(--ground)";
+  $("question").style.color = on(t.question || "#ffffff");
+}
+
+function carousel(t, count) {
+  const active = (t.background === "carousel") && count > 0;
+  $("veil").style.display = active ? "block" : "none";
+  if (!active) { $("bg0").classList.remove("on"); $("bg1").classList.remove("on"); bgIndex = -1; return; }
+  const period = Math.max(3, t.carousel_seconds || 12) * 1000;
+  const index = Math.floor((performance.now() - started) / period) % count;
+  if (index === bgIndex) return;
+  bgIndex = index; bgFront = 1 - bgFront;
+  const front = $("bg" + bgFront), back = $("bg" + (1 - bgFront));
+  front.src = "/bg/" + index; front.classList.add("on"); back.classList.remove("on");
+}
+
+function buildHosts(stage, avatars) {
+  const box = $("hosts"); box.innerHTML = ""; hostEls = [];
+  stage.agents.forEach((name, i) => {
+    const el = document.createElement("div"); el.className = "host";
+    el.innerHTML = '<div class="portrait"></div><div class="name"></div><div class="side"></div><div class="status"></div>';
+    const portrait = el.querySelector(".portrait");
+    if (avatars[i] && stage.avatars[i]) {
+      const img = document.createElement("img"); img.alt = ""; portrait.appendChild(img);
+      ["idle", "talk", "blink"].forEach((f) => { const p = new Image(); p.src = `/avatars/${stage.avatars[i]}/${f}.png`; });
+    } else {
+      portrait.innerHTML = '<div class="initial"></div>';
+      portrait.querySelector(".initial").textContent = (name || "?").charAt(0).toUpperCase();
+    }
+    el.querySelector(".name").textContent = name || "…";
+    box.appendChild(el); hostEls.push(el);
+  });
+}
+
+function render() {
+  if (!state) return;
+  const { stage, avatars, theme } = state, t = theme || {};
+  const now = (performance.now() - started) / 1000;
+  carousel(t, state.backgrounds || 0);
+  $("brand").textContent = (stage.show || "Hakikat Arayışı").toLocaleUpperCase("tr");
+  $("topic").textContent = stage.finished ? "Bu akşamlık bu kadar. İzlediğiniz için teşekkürler."
+    : (stage.topic || "Birazdan başlıyoruz");
+  $("phase").textContent = stage.phase || "";
+  $("next").textContent = stage.topic_total > 0 ? `SORU ${stage.topic_number} / ${stage.topic_total}` : "";
+  const key = stage.agents.join("|") + stage.avatars.join("|") + avatars.join("|");
+  if (key !== render.key) { render.key = key; buildHosts(stage, avatars); }
+  const sideColor = (i) => (i === 0 ? t.side_a : t.side_b) || "#ffffff";
+  stage.agents.forEach((name, i) => {
+    const el = hostEls[i]; if (!el) return;
+    const speaking = !!name && stage.speaker === name;
+    const thinking = !speaking && !!name && stage.thinking === name;
+    const level = speaking ? stage.level / 100 : 0, color = sideColor(i);
+    el.classList.toggle("dim", !!stage.speaker && !speaking);
+    const portrait = el.querySelector(".portrait");
+    portrait.style.borderColor = speaking ? color : "var(--border)";
+    const img = portrait.querySelector("img");
+    if (img) {
+      const blink = !speaking && ((now + i * 1.7) % 4.6) < 0.14;
+      const frame = speaking && level > 0.3 ? "talk" : blink ? "blink" : "idle";
+      const src = `/avatars/${stage.avatars[i]}/${frame}.png`;
+      if (!img.src.endsWith(src)) img.src = src;
+      img.style.transform = `translateY(${(Math.sin(now * 1.5 + i) * 3.75).toFixed(2)}px)`;
+    }
+    const side = el.querySelector(".side");
+    side.style.display = stage.sides[i] ? "block" : "none";
+    side.textContent = stage.sides[i] || ""; side.style.background = color; side.style.color = on(color);
+    const status = el.querySelector(".status");
+    status.className = "status" + (thinking ? " thinking" : "");
+    if (speaking) { status.style.color = color; status.innerHTML = '<span class="dot"></span>KONUŞUYOR'; status.querySelector(".dot").style.background = color; }
+    else if (thinking) { status.textContent = "düşünüyor" + ".".repeat(1 + Math.floor(now * 2.5) % 3); }
+    else status.textContent = "";
+  });
+  const q = $("question");
+  q.style.display = stage.question ? "flex" : "none";
+  q.querySelector(".text").textContent = (stage.question || "").slice(0, 120);
+  const c = $("caption"), idx = stage.agents.indexOf(stage.speaker || "");
+  c.style.display = stage.caption ? "flex" : "none";
+  c.querySelector(".who").textContent = stage.speaker || "";
+  c.querySelector(".who").style.color = idx >= 0 ? sideColor(idx) : "var(--text)";
+  c.querySelector(".text").textContent = stage.caption || "";
+}
+
+async function poll() {
+  try {
+    const response = await fetch("/state.json", { cache: "no-store" });
+    if (response.ok) { state = await response.json(); applyTheme(state.theme || {}); }
+  } catch (_) { /* runtime restarting; keep the last frame */ }
+  setTimeout(poll, 120);
+}
+(function frame() { render(); requestAnimationFrame(frame); })();
+poll();
+</script>
+</body>
+</html>

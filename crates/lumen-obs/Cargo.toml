@@ -1,0 +1,18 @@
+[package]
+name = "lumen-obs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "OBS Studio control for Lumen: websocket setup, Lumen scene, PipeWire audio, stream/record"
+
+[dependencies]
+obws = "0.15"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+serde_json = "1"
+toml = "1"
+lumen-protocol = { path = "../lumen-protocol" }
+
+[dev-dependencies]
+tempfile = "3"
+base64 = "0.22"
+tokio = { version = "1", features = ["rt", "time", "macros"] }

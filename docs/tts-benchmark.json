@@ -1,0 +1,44 @@
+{
+  "device": "cpu",
+  "measurements": [
+    {
+      "audio_seconds": 3.11,
+      "cold_process": true,
+      "first_chunk_ms": 13104.74985,
+      "frames": 38,
+      "text": "Merhaba. Bugün tarihi tartışıyoruz.",
+      "total_ms": 17641.192447,
+      "voice": "female_2"
+    },
+    {
+      "audio_seconds": 4.96,
+      "cold_process": false,
+      "first_chunk_ms": 2666.9993010000003,
+      "frames": 62,
+      "text": "Dr. Ayşe Yılmaz, 29 Ekim 1923 tarihini nasıl yorumluyor?",
+      "total_ms": 10476.700527,
+      "voice": "male_1"
+    },
+    {
+      "audio_seconds": 4.31,
+      "cold_process": false,
+      "first_chunk_ms": 640.2026830000001,
+      "frames": 53,
+      "text": "Bu itirazı kabul ediyorum. Fakat kaynağını birlikte kontrol edelim.",
+      "total_ms": 6302.985198,
+      "voice": "female_2"
+    },
+    {
+      "audio_seconds": 2.64,
+      "cold_process": false,
+      "first_chunk_ms": 676.1265440000001,
+      "frames": 33,
+      "text": "Bir dakika, bu iddianın dayanağı nedir?",
+      "total_ms": 6145.645429,
+      "voice": "male_1"
+    }
+  ],
+  "model_cache": "warm",
+  "model_revision": "fcbd37c74dc127be846face0ff36062e9a939f7b",
+  "sample_rate": 24000
+}

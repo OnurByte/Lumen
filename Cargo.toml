@@ -1,0 +1,45 @@
+[workspace]
+members = [
+    "apps/lumen-tiktok",
+    "apps/lumen-live",
+    "apps/lumend",
+    "apps/lumen-studio",
+    "apps/lumen-stage",
+    "crates/lumen-voice",
+    "crates/lumen-audience",
+    "crates/lumen-storage",
+    "crates/lumen-debate",
+    "crates/lumen-personagen",
+    "crates/lumen-obs",
+    "crates/lumen-protocol",
+    "crates/lumen-live",
+    "crates/lumen-accounts",
+    "crates/lumen-platform-tiktok",
+    "crates/lumen-platform-kwai",
+    "crates/lumen-platform-likee",
+    "crates/lumen-broadcast",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+
+[workspace.dependencies]
+async-trait = "0.1"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "sync", "time", "process", "signal", "fs"] }
+tokio-util = "0.7"
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "cookies"] }
+prost = "0.14"
+rand = "0.9"
+zeroize = { version = "1", features = ["derive"] }

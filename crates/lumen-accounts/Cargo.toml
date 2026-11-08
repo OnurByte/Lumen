@@ -1,0 +1,23 @@
+[package]
+name = "lumen-accounts"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Account Center: SQLite-backed multi-platform accounts with encrypted credentials"
+
+[dependencies]
+lumen-live = { path = "../lumen-live" }
+sqlx.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+chacha20poly1305 = "0.10"
+sha2 = "0.10"
+rand.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

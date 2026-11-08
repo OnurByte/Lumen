@@ -1,0 +1,18 @@
+[package]
+name = "lumen-platform-likee"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Likee GLOBAL web API port (profile, creator lookup, videos, trending, hashtags, comments); LIVE events unsupported"
+
+[dependencies]
+lumen-live = { path = "../lumen-live" }
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

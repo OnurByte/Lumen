@@ -1,0 +1,8 @@
+[package]
+name = "lumen-stage"
+version = "0.1.0"
+edition.workspace = true
+[dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = ["2d", "wayland", "x11"] }
+
+lumen-protocol = { path = "../../crates/lumen-protocol" }

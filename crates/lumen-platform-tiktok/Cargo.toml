@@ -1,0 +1,17 @@
+[package]
+name = "lumen-platform-tiktok"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Native Rust TikTok LIVE adapter (per-account sessions) built on piratetok-live-rs"
+
+[dependencies]
+lumen-live = { path = "../lumen-live" }
+piratetok-live-rs = "=0.5.0"
+async-trait.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

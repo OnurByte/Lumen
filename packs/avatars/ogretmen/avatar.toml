@@ -1,0 +1,8 @@
+# Look for the "ogretmen" stage avatar (Nermin Hanım). `lumend generate-avatars` draws
+# idle.png from this, then edits it into talk.png (mouth open) and blink.png (eyes closed).
+look = """
+A fictional retired Turkish history teacher, about 65 years old: short silver-grey bob haircut, \
+thin gold metal-framed glasses, small pearl earrings, tailored deep burgundy blazer over a cream \
+blouse, a small red enamel lapel pin. Warm but determined, serious and confident expression, \
+looking straight at the camera.
+"""

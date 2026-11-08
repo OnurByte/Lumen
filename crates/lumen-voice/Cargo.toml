@@ -1,0 +1,10 @@
+[package]
+name = "lumen-voice"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+cpal = "=0.17.3"
+tokio = { version = "1", features = ["process", "io-util", "time", "sync", "macros", "rt-multi-thread"] }
+tokio-util = "0.7"
+serde_json = "1"

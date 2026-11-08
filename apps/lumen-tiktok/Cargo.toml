@@ -1,0 +1,10 @@
+[package]
+name = "lumen-tiktok"
+version = "0.1.0"
+edition.workspace = true
+[dependencies]
+lumen-live = { path = "../../crates/lumen-live" }
+lumen-platform-tiktok = { path = "../../crates/lumen-platform-tiktok" }
+tokio.workspace = true
+tokio-util.workspace = true
+tracing-subscriber.workspace = true

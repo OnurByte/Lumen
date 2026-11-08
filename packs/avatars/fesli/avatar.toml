@@ -1,0 +1,8 @@
+# Look for the "fesli" stage avatar (Kâmil Efendi). `lumend generate-avatars` draws
+# idle.png from this, then edits it into talk.png (mouth open) and blink.png (eyes closed).
+look = """
+A fictional elderly Turkish conservative intellectual in the late-Ottoman style, about 75 years \
+old: deep red Ottoman fez with a black silk tassel, neatly trimmed white beard and white \
+moustache, thoughtful dark eyes, dark charcoal formal frock coat with a white shirt collar. Calm, \
+stern, dignified expression, looking straight at the camera.
+"""

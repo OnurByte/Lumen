@@ -1,0 +1,17 @@
+[package]
+name = "lumen-broadcast"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "One scene → many authorized RTMP(S)/SRT destinations, each with its own FFmpeg process and failure handling"
+
+[dependencies]
+lumen-live = { path = "../lumen-live" }
+bytes.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
