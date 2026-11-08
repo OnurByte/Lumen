@@ -30,6 +30,19 @@ pub struct Destination {
     pub audio_kbps: u32,
 }
 
+/// Reject ingest targets FFmpeg would misread or that smuggle credentials into the server URL.
+pub fn validate_target(ingest_url: &str, stream_key: &str) -> Result<(), String> {
+    let authority = ["rtmp://", "rtmps://", "srt://"].iter().find_map(|s| ingest_url.strip_prefix(s)).ok_or("ingest URL must start with rtmp://, rtmps:// or srt://")?;
+    let host = authority.split(['/', '?']).next().unwrap_or("");
+    if host.is_empty() || host.contains('@') || ingest_url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("ingest URL needs a host, without spaces or user:password".into());
+    }
+    if stream_key.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("stream key contains whitespace; copy it again".into());
+    }
+    Ok(())
+}
+
 impl Destination {
     fn target_url(&self) -> String {
         if self.stream_key.is_empty() { self.ingest_url.clone() } else { format!("{}/{}", self.ingest_url.trim_end_matches('/'), self.stream_key.expose()) }
@@ -115,10 +128,10 @@ async fn run_destination(i: usize, d: Destination, tx: broadcast::Sender<Bytes>,
         update(&health, i, |h| { h.state = DestinationState::Streaming; h.starts += 1; });
         let mut child = match tokio::process::Command::new(&ffmpeg)
             .args(["-hide_banner", "-loglevel", "warning", "-fflags", "+genpts", "-f", "mpegts", "-i", "pipe:0"])
-            .args(["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-g", "60"])
+            .args(["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-g", "60", "-pix_fmt", "yuv420p"])
             .args(["-b:v", &format!("{}k", d.video_kbps), "-maxrate", &format!("{}k", d.video_kbps), "-bufsize", &format!("{}k", d.video_kbps * 2)])
             .args(["-c:a", "aac", "-b:a", &format!("{}k", d.audio_kbps), "-f", d.format()])
-            // shortcut: the key is visible in this host's process list while streaming; use a dedicated OS user if other local users are untrusted.
+            // shortcut: the key is visible in this host's process list while streaming (FFmpeg 9 cannot read an output URL from a file or fd); use a dedicated OS user if other local users are untrusted.
             .arg(d.target_url())
             .stdin(Stdio::piped())
             .stdout(Stdio::null())

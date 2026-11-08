@@ -1,4 +1,6 @@
 //! `lumen-live`: Account Center, concurrent LIVE connections and multi-destination broadcast.
+mod login;
+mod update;
 mod ws;
 
 use lumen_accounts::{Account, AccountCenter, NewAccount};
@@ -22,6 +24,7 @@ ACCOUNTS
   accounts enable REF | disable REF  accounts live REF on|off
   accounts set REF KEY [VALUE]       (settings: watch, proxy, region, language, device_id, socket,
                                       share_url (Likee LIVE link), studio_cover, studio_caption (Kwai Studio))
+  accounts login REF [--browser PATH]  (opens the platform's login page; you log in, Lumen stores the session encrypted)
   accounts secret REF NAME           (reads the value from stdin: cookie, stream_key, studio_cookie)
   accounts broadcast REF --ingest rtmps://… [--video-kbps N] [--audio-kbps N]
   accounts authorize-broadcast REF --confirm   |   accounts revoke-broadcast REF
@@ -30,11 +33,13 @@ SCENES
   scene set NAME REF...    scene list
 RUN
   connect [--group G] [--account REF]... [--socket LUMEND_SOCKET] [--events-ws 127.0.0.1:PORT] [--status-secs N]
-  broadcast --scene NAME [--listen 127.0.0.1:9100] [--ffmpeg PATH]
+  broadcast --scene NAME [--check] [--source test|FILE] [--listen 127.0.0.1:9100] [--ffmpeg PATH]
+                                     (--check verifies every destination without going LIVE)
+APP
+  update [--check] [--rollback]    info    --version
 LOOKUPS
   profile PLATFORM HANDLE      capabilities
-  likee search KEYWORD [COUNTRY] | user UID | videos CREATOR_ID | trending [COUNTRY] | hashtags [COUNTRY]
-        | hashtag ID [COUNTRY] | comments VIDEO_ID
+  likee [--account REF] search KEYWORD [COUNTRY] | videos CREATOR_ID | trending [COUNTRY] | hashtags [COUNTRY] | comments VIDEO_ID
 
 REF is an account label, id or unique id prefix. Data lives in $LUMEN_HOME (default ~/.local/share/lumen).";
 
@@ -139,6 +144,14 @@ async fn accounts(mut a: Args) -> Result<(), String> {
         cmd @ ("enable" | "disable") => { let acct = c.resolve(&a.need("REF")?).await.map_err(e)?; c.set_enabled(&acct.id, cmd == "enable").await.map_err(e)?; }
         "live" => { let acct = c.resolve(&a.need("REF")?).await.map_err(e)?; c.set_live_enabled(&acct.id, a.need("on|off")? == "on").await.map_err(e)?; }
         "set" => { let acct = c.resolve(&a.need("REF")?).await.map_err(e)?; let key = a.need("KEY")?; c.set_setting(&acct.id, &key, a.pos().as_deref()).await.map_err(e)?; }
+        "login" => {
+            let acct = c.resolve(&a.need("REF")?).await.map_err(e)?;
+            let (ad, target) = (adapter(acct.platform), acct.live_target());
+            let spec = ad.login_spec(&target).ok_or_else(|| format!("{} has no browser login", acct.platform))?;
+            let session = login::capture(ad.as_ref(), &target, &spec, a.flag("--browser"), &lumen_accounts::default_home()).await?;
+            c.set_credential(&acct.id, spec.credential, session.expose()).await.map_err(e)?;
+            println!("logged in: {} session stored encrypted as '{}'", acct.label, spec.credential);
+        }
         "secret" => {
             let acct = c.resolve(&a.need("REF")?).await.map_err(e)?;
             let name = a.need("NAME")?;
@@ -147,8 +160,11 @@ async fn accounts(mut a: Args) -> Result<(), String> {
         }
         "broadcast" => {
             let acct = c.resolve(&a.need("REF")?).await.map_err(e)?;
-            let kbps = |v: Option<String>| v.map(|s| s.parse::<u32>().map_err(|_| "bitrate must be a number".to_string())).transpose();
-            c.set_broadcast(&acct.id, a.flag("--ingest").as_deref(), kbps(a.flag("--video-kbps"))?, kbps(a.flag("--audio-kbps"))?).await.map_err(e)?;
+            let kbps = |v: Option<String>, min: u32, max: u32| v.map(|s| s.parse::<u32>().ok().filter(|n| (min..=max).contains(n)).ok_or(format!("bitrate must be {min}-{max} kbps"))).transpose();
+            let (video, audio) = (kbps(a.flag("--video-kbps"), 300, 50_000)?, kbps(a.flag("--audio-kbps"), 32, 512)?);
+            let ingest = a.flag("--ingest");
+            if let Some(url) = &ingest { lumen_broadcast::validate_target(url, "")?; }
+            c.set_broadcast(&acct.id, ingest.as_deref(), video, audio).await.map_err(e)?;
         }
         "authorize-broadcast" => {
             let acct = c.resolve(&a.need("REF")?).await.map_err(e)?;
@@ -264,11 +280,20 @@ async fn connect(mut a: Args) -> Result<(), String> {
     Ok(())
 }
 
+/// FFmpeg input arguments for `--source`; vertical test card because Kwai and TikTok are portrait.
+fn source_input(source: &str) -> Vec<String> {
+    let args: &[&str] = if source == "test" { &["-f", "lavfi", "-i", "testsrc2=s=720x1280:r=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"] } else { &["-stream_loop", "-1", "-i", source] };
+    args.iter().map(|s| (*s).to_owned()).collect()
+}
+
 async fn broadcast(mut a: Args) -> Result<(), String> {
     let c = center().await?;
     let scene = c.scene(&a.flag("--scene").ok_or("--scene required")?).await.map_err(|e| e.to_string())?;
     let listen = a.flag("--listen").unwrap_or_else(|| "127.0.0.1:9100".into());
     let ffmpeg = a.flag("--ffmpeg").unwrap_or_else(|| "ffmpeg".into());
+    let source = a.flag("--source");
+    let check = a.switch("--check");
+    let mut ready = 0;
     let mut destinations = Vec::new();
     let mut provisioned = Vec::new();
     for id in &scene.destinations {
@@ -280,10 +305,22 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
         if !b.authorized { skip("not authorized for broadcasting (accounts authorize-broadcast)"); continue; }
         if !b.enabled { skip("broadcast is off (accounts broadcast-on)"); continue; }
         let creds = c.credentials(id).await.map_err(|e| e.to_string())?;
+        let stored = b.ingest_url.clone().zip(creds.get("stream_key").cloned());
+        if check {
+            let report = match &stored {
+                Some((url, key)) => lumen_broadcast::validate_target(url, key.expose()).map(|()| "stored ingest URL and stream_key look valid; if the platform does not start by itself, press Start Live in its own tools".to_owned()),
+                None => adapter(acct.platform).check_broadcast(&acct.live_target(), &creds).await.map_err(|e| e.to_string()),
+            };
+            match report {
+                Ok(r) => { ready += 1; println!("ready {}: {r}", acct.label); }
+                Err(why) => skip(&why),
+            }
+            continue;
+        }
         // A key the operator entered wins; otherwise ask the platform for one (Kwai Studio).
-        let (ingest, key) = match (b.ingest_url.clone(), creds.get("stream_key").cloned()) {
-            (Some(ingest), Some(key)) => (ingest, key),
-            _ => {
+        let (ingest, key) = match stored {
+            Some(pair) => pair,
+            None => {
                 let target = acct.live_target();
                 match adapter(acct.platform).provision_broadcast(&target, &creds).await {
                     Ok(ep) => {
@@ -296,7 +333,17 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
                 }
             }
         };
+        if let Err(why) = lumen_broadcast::validate_target(&ingest, key.expose()) { skip(&why); continue; }
         destinations.push(Destination { account_id: acct.id.clone(), label: acct.label.clone(), platform: acct.platform, ingest_url: ingest, stream_key: key, video_kbps: b.video_bitrate_kbps, audio_kbps: b.audio_bitrate_kbps });
+    }
+    if check {
+        let encoders = tokio::process::Command::new(&ffmpeg).args(["-hide_banner", "-encoders"]).output().await.map_err(|e| format!("cannot run {ffmpeg}: {e}"))?;
+        let list = String::from_utf8_lossy(&encoders.stdout);
+        if !list.contains("libx264") || !list.contains(" aac ") {
+            return Err(format!("{ffmpeg} lacks the libx264 or aac encoder"));
+        }
+        println!("ffmpeg: ok\n{ready}/{} destinations ready", scene.destinations.len());
+        return if ready > 0 { Ok(()) } else { Err("no destination is ready".into()) };
     }
     if destinations.is_empty() {
         return Err("no authorized, enabled destinations in this scene".into());
@@ -305,9 +352,25 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
     if !listener.local_addr().map_err(|e| e.to_string())?.ip().is_loopback() {
         return Err("ingest must listen on a loopback address".into());
     }
-    println!("send MPEG-TS to tcp://{listen} (OBS: Settings → Output → Recording → Custom Output (FFmpeg), output to URL, container mpegts)");
+    if source.is_none() {
+        println!("send MPEG-TS to tcp://{listen} (OBS: Settings → Output → Recording → Custom Output (FFmpeg), output to URL, container mpegts)");
+    }
     let cancel = CancellationToken::new();
-    let relay = lumen_broadcast::start(listener, destinations, ffmpeg, cancel.clone());
+    let relay = lumen_broadcast::start(listener, destinations, ffmpeg.clone(), cancel.clone());
+    let mut source_proc = match &source {
+        Some(s) => Some(
+            tokio::process::Command::new(&ffmpeg)
+                .args(["-hide_banner", "-loglevel", "error", "-re"])
+                .args(source_input(s))
+                .args(["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "mpegts"])
+                .arg(format!("tcp://{listen}"))
+                .stdin(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| format!("cannot start source: {e}"))?,
+        ),
+        None => None,
+    };
     // Platform-side "go live" for provisioned rooms, once their video is actually flowing.
     let mut pending: Vec<_> = provisioned.iter().collect();
     let mut tick = tokio::time::interval(Duration::from_secs(10));
@@ -315,6 +378,10 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
             _ = tick.tick() => {
+                if let Some(status) = source_proc.as_mut().and_then(|p| p.try_wait().ok().flatten()) {
+                    println!("source ended: {status}");
+                    source_proc = None;
+                }
                 let snapshot = relay.snapshot();
                 for h in &snapshot {
                     println!("dest {:<20} {:<12} {:?} starts={} sent={}KiB err={}", h.label, h.platform.as_str(), h.state, h.starts, h.bytes_sent / 1024, h.last_error.as_deref().unwrap_or("-"));
@@ -346,7 +413,14 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
 }
 
 async fn likee(mut a: Args) -> Result<(), String> {
-    let cl = lumen_platform_likee::LikeeClient::new(None).map_err(|e| e.to_string())?;
+    let mut cl = lumen_platform_likee::LikeeClient::new(None).map_err(|e| e.to_string())?;
+    if let Some(reference) = a.flag("--account") {
+        let c = center().await?;
+        let acct = c.resolve(&reference).await.map_err(|e| e.to_string())?;
+        let creds = c.credentials(&acct.id).await.map_err(|e| e.to_string())?;
+        let session = creds.get("web_session").ok_or("this account has no Likee login yet; run `accounts login`")?;
+        cl = cl.with_session(session).map_err(|e| e.to_string())?;
+    }
     let country = |a: &mut Args| a.pos().unwrap_or_else(|| "US".into());
     fn show<T: serde::Serialize>(r: Result<T, lumen_live::AdapterError>) -> Result<(), String> {
         println!("{}", serde_json::to_string_pretty(&r.map_err(|e| e.to_string())?).unwrap_or_default());
@@ -356,9 +430,7 @@ async fn likee(mut a: Args) -> Result<(), String> {
         "videos" => show(cl.creator_videos(&a.need("CREATOR_ID")?, "", 30).await),
         "trending" => show(cl.trending_videos(&country(&mut a), "en", 0, 30).await),
         "hashtags" => show(cl.trending_hashtags(&country(&mut a), "en", 1, 50).await),
-        "hashtag" => { let id = a.need("HASHTAG_ID")?; show(cl.hashtag_videos(&id, &country(&mut a), 1, 30).await) }
         "search" => show(cl.search_users(&a.need("KEYWORD")?, 20, &country(&mut a)).await),
-        "user" => show(cl.user_info(&a.need("UID")?).await),
         "comments" => show(cl.video_comments(&a.need("VIDEO_ID")?, "en", "0", 49).await),
         other => Err(format!("unknown likee subcommand '{other}'")),
     }
@@ -371,6 +443,24 @@ async fn run() -> Result<(), String> {
         Some("scene") => scene(a).await,
         Some("connect") => connect(a).await,
         Some("broadcast") => broadcast(a).await,
+        Some("update") => {
+            if a.switch("--check") {
+                println!("{}", update::check().await?);
+            } else if a.switch("--rollback") {
+                println!("{}", update::rollback()?);
+            } else {
+                println!("{}", update::install().await?);
+            }
+            Ok(())
+        }
+        Some("info") => {
+            println!("Lumen {}\nSource: https://github.com/OnurByte/Lumen\nData: {}", update::VERSION, lumen_accounts::default_home().display());
+            Ok(())
+        }
+        Some("--version" | "version") => {
+            println!("Lumen {}", update::VERSION);
+            Ok(())
+        }
         Some("likee") => likee(a).await,
         Some("profile") => {
             let p: Platform = a.need("PLATFORM")?.parse()?;

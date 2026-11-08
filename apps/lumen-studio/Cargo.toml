@@ -14,6 +14,7 @@ lumen-obs = { path = "../../crates/lumen-obs" }
 lumen-accounts = { path = "../../crates/lumen-accounts" }
 lumen-live = { path = "../../crates/lumen-live" }
 tokio = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 gpui = { version = "=0.2.2", features = ["test-support"] }

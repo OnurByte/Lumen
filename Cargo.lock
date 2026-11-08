@@ -6265,6 +6265,7 @@ dependencies = [
  "lumen-platform-kwai",
  "lumen-platform-likee",
  "lumen-platform-tiktok",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -6382,6 +6383,7 @@ dependencies = [
  "lumen-obs",
  "lumen-protocol",
  "serde",
+ "serde_json",
  "tokio",
  "toml 1.2.1+spec-1.1.0",
 ]

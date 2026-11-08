@@ -1,4 +1,4 @@
-//! The single Lumen window: sidebar navigation (Prova, Kontrol, Görünüm), pack and mode
+//! The single Lumen window: sidebar navigation, show and mode
 //! selection, and the show runtime (`lumend`) started and stopped by the app itself.
 use crate::{
     Studio,
@@ -33,6 +33,43 @@ enum Page {
     Broadcast,
     Questions,
     Accounts,
+    Info,
+}
+
+actions!(lumen, [ToggleFinder]);
+
+/// Open while the user searches; `selected` indexes the filtered list.
+struct Finder {
+    selected: usize,
+}
+
+#[derive(Clone)]
+enum FindAction {
+    Go(Page),
+    Show(usize),
+    Mode(Mode),
+    Frame,
+    CheckUpdates,
+}
+
+/// First-run guide: welcome, name, first question, hosts, done.
+struct Onboarding {
+    step: usize,
+    error: Option<String>,
+    name: Entity<InputState>,
+    question: Entity<InputState>,
+    host_a: Entity<InputState>,
+    host_b: Entity<InputState>,
+}
+
+#[derive(Clone)]
+enum UpdateState {
+    Idle,
+    Checking,
+    Ready(crate::product::Release),
+    Installing,
+    Installed,
+    Failed(String),
 }
 
 /// Port of the overlay page `lumend` serves for OBS (see `LUMEN_OVERLAY_PORT`).
@@ -56,8 +93,8 @@ pub enum Mode {
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Models => "GPT rehearsal",
-            Mode::Scripted => "Scripted rehearsal",
+            Mode::Models => "AI rehearsal",
+            Mode::Scripted => "Practice without AI",
             Mode::Live => "Live broadcast",
         }
     }
@@ -146,22 +183,31 @@ pub struct LumenApp {
     accounts: Vec<crate::accounts::Row>,
     accounts_error: Option<String>,
     confirm_remove: Option<lumen_live::AccountId>,
+    confirm_authorize: Option<lumen_live::AccountId>,
+    signing_in: Option<lumen_live::AccountId>,
+    new_platform: lumen_live::Platform,
+    new_handle: Entity<InputState>,
+    pack_titles: Vec<String>,
+    show_name: Entity<InputState>,
+    finder: Option<Finder>,
+    finder_input: Entity<InputState>,
+    onboarding: Option<Onboarding>,
+    update: UpdateState,
 }
 
 impl LumenApp {
     pub fn new(socket: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.set_global(Theme::load());
         let packs = packs();
-        let pack = packs
-            .iter()
-            .position(|p| p.file_stem().is_some_and(|s| s == "hakikat-arayisi"))
-            .unwrap_or(0);
+        let pack = 0;
+        let pack_titles: Vec<String> = packs.iter().map(|p| crate::product::show_title(p)).collect();
         let start = match std::env::var("LUMEN_PAGE").as_deref() {
             Ok("control") => Page::Control,
             Ok("appearance") => Page::Look,
             Ok("broadcast") => Page::Broadcast,
             Ok("questions") => Page::Questions,
             Ok("accounts") => Page::Accounts,
+            Ok("info") => Page::Info,
             _ => Page::Rehearsal,
         };
         let theme = cx.try_global::<Theme>().cloned().unwrap_or_default();
@@ -249,6 +295,58 @@ impl LumenApp {
             },
         )
         .detach();
+        let first_title = pack_titles.first().cloned().unwrap_or_default();
+        let show_name = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).placeholder("Your show's name");
+            state.set_value(first_title, window, cx);
+            state
+        });
+        cx.subscribe_in(&show_name, window, |app, state, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::PressEnter { .. }) {
+                let name = state.read(cx).value().to_string();
+                app.rename_show(&name, cx);
+            }
+        })
+        .detach();
+        let finder_input = cx.new(|cx| InputState::new(window, cx).placeholder("Where to?"));
+        cx.subscribe_in(&finder_input, window, |app, _, event: &InputEvent, window, cx| match event {
+            InputEvent::PressEnter { .. } => app.run_selected(window, cx),
+            InputEvent::Change => {
+                if let Some(finder) = &mut app.finder {
+                    finder.selected = 0;
+                }
+                cx.notify();
+            }
+            _ => {}
+        })
+        .detach();
+        let onboarding = (!crate::product::onboarded() && std::env::var_os("LUMEN_NO_ONBOARDING").is_none()).then(|| {
+            let field = |cx: &mut Context<Self>, window: &mut Window, hint: &'static str| {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder(hint));
+                cx.subscribe_in(&input, window, |app, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. }) {
+                        app.onboarding_next(window, cx);
+                    }
+                })
+                .detach();
+                input
+            };
+            Onboarding {
+                step: 0,
+                error: None,
+                name: field(cx, window, "For example, Sunday Night Debate"),
+                question: field(cx, window, "For example, Is working from home better?"),
+                host_a: field(cx, window, "First host"),
+                host_b: field(cx, window, "Second host"),
+            }
+        });
+        let new_handle = cx.new(|cx| InputState::new(window, cx).placeholder("Username on that platform"));
+        cx.subscribe_in(&new_handle, window, |app, _, event: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = event {
+                app.add_connection(window, cx);
+            }
+        })
+        .detach();
         let mut app = Self {
             page: start,
             rehearsal: cx.new(|cx| {
@@ -266,7 +364,7 @@ impl LumenApp {
             socket,
             packs,
             pack,
-            mode: Mode::Models,
+            mode: if codex_available() { Mode::Models } else { Mode::Scripted },
             obs: lumen_obs::Controller::spawn(),
             obs_status: lumen_obs::Status::default(),
             session: Session::default(),
@@ -283,7 +381,21 @@ impl LumenApp {
             accounts: Vec::new(),
             accounts_error: None,
             confirm_remove: None,
+            confirm_authorize: None,
+            signing_in: None,
+            new_platform: lumen_live::Platform::KwaiGlobal,
+            new_handle,
+            pack_titles,
+            show_name,
+            finder: None,
+            finder_input,
+            onboarding,
+            update: UpdateState::Idle,
         };
+        // Quietly look for a newer release; never for headless tests.
+        if std::env::var_os("LUMEN_NO_ONBOARDING").is_none() {
+            app.check_update(cx);
+        }
         if start == Page::Accounts {
             app.accounts_op(None, cx);
         }
@@ -349,7 +461,7 @@ impl LumenApp {
         match self.spawn(&pack) {
             Ok(child) => {
                 self.runtime.child = Some(child);
-                self.runtime.status = format!("{} ⁜ {}", pack_name(&pack), self.mode.label());
+                self.runtime.status = format!("{} ⁜ {}", crate::product::show_title(&pack), self.mode.label());
             }
             Err(e) => self.runtime.status = format!("Could not start the runtime: {e}"),
         }
@@ -483,28 +595,34 @@ fn pack_name(path: &Path) -> String {
         .map_or_else(String::new, |s| s.to_string_lossy().into_owned())
 }
 
+/// True when the `codex` CLI that AI rehearsals use is on PATH.
+fn codex_available() -> bool {
+    std::env::var_os("LUMEN_CODEX_BIN").is_some()
+        || std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| d.join("codex").is_file()))
+}
+
 // ---------------------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------------------
 
 fn nav_item(id: &'static str, label: &'static str, active: bool) -> Stateful<Div> {
-    div()
-        .id(id)
-        .flex()
-        .items_center()
-        .h_11()
-        .px_3()
-        .rounded_lg()
-        .text_sm()
-        .cursor_pointer()
-        .when(active, |d| d.bg(color::muted()))
-        .text_color(if active {
-            color::foreground()
-        } else {
-            color::muted_foreground()
-        })
-        .hover(|s| s.bg(color::muted()))
-        .child(label)
+    ui::focusable(
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .h_11()
+            .px_3()
+            .rounded_lg()
+            .border_1()
+            .border_color(rgba(0))
+            .text_sm()
+            .cursor_pointer()
+            .when(active, |d| d.bg(color::muted()))
+            .text_color(if active { color::foreground() } else { color::muted_foreground() })
+            .hover(|s| s.bg(color::muted()))
+            .child(label),
+    )
 }
 
 fn small_label(text: &str) -> Div {
@@ -518,61 +636,23 @@ impl LumenApp {
     fn sidebar(&self, cx: &mut Context<Self>) -> Div {
         let page = self.page;
         let pages = [
-            ("nav-rehearsal", "Rehearsal  Ctrl 1", Page::Rehearsal),
-            ("nav-questions", "Questions  Ctrl 2", Page::Questions),
-            ("nav-control", "Control  Ctrl 3", Page::Control),
-            ("nav-look", "Appearance  Ctrl 4", Page::Look),
-            ("nav-broadcast", "Broadcast  Ctrl 5", Page::Broadcast),
-            ("nav-accounts", "Accounts  Ctrl 6", Page::Accounts),
+            ("nav-rehearsal", "Rehearsal", Page::Rehearsal),
+            ("nav-questions", "Questions", Page::Questions),
+            ("nav-control", "Control", Page::Control),
+            ("nav-look", "Appearance", Page::Look),
+            ("nav-broadcast", "Broadcast", Page::Broadcast),
+            ("nav-accounts", "Connections", Page::Accounts),
+            ("nav-info", "Info", Page::Info),
         ];
         let mut nav = div().flex().flex_col().gap_1();
         for (id, label, target) in pages {
-            nav = nav.child(nav_item(id, label, page == target).on_click(cx.listener(
-                move |app, _, window, cx| {
-                    app.page = target;
-                    if target == Page::Accounts {
-                        app.accounts_op(None, cx);
-                    }
-                    let focus = match target {
-                        Page::Rehearsal => app.rehearsal.read(cx).focus.clone(),
-                        Page::Control => app.control.read(cx).focus.clone(),
-                        Page::Look | Page::Broadcast | Page::Questions | Page::Accounts => app.focus.clone(),
-                    };
-                    window.focus(&focus);
-                    cx.notify();
-                },
-            )));
+            nav = nav.child(nav_item(id, label, page == target).on_click(cx.listener(move |app, _, window, cx| app.go_to(target, window, cx))));
         }
         let mut pack_list = div().flex().flex_col().gap_1();
-        for (index, pack) in self.packs.iter().enumerate() {
+        for (index, title) in self.pack_titles.iter().enumerate() {
             let id = SharedString::from(format!("pack-{index}"));
             pack_list = pack_list.child(
-                div()
-                    .id(id)
-                    .h_9()
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .rounded_lg()
-                    .text_xs()
-                    .cursor_pointer()
-                    .when(index == self.pack, |d| {
-                        d.border_1().border_color(color::border())
-                    })
-                    .text_color(if index == self.pack {
-                        color::foreground()
-                    } else {
-                        color::muted_foreground()
-                    })
-                    .hover(|s| s.bg(color::muted()))
-                    .child(pack_name(pack))
-                    .on_click(cx.listener(move |app, _, _, cx| {
-                        if app.pack != index {
-                            app.pack = index;
-                            app.restart();
-                            cx.notify();
-                        }
-                    })),
+                nav_item("show", "", index == self.pack).id(id).child(title.clone()).on_click(cx.listener(move |app, _, window, cx| app.select_show(index, window, cx))),
             );
         }
         let mut modes = div().flex().flex_col().gap_1();
@@ -584,8 +664,6 @@ impl LumenApp {
             modes = modes.child(
                 nav_item("mode", mode.label(), self.mode == mode)
                     .id(id)
-                    .h_9()
-                    .text_xs()
                     .on_click(cx.listener(move |app, _, _, cx| {
                         if app.mode != mode {
                             app.mode = mode;
@@ -602,7 +680,7 @@ impl LumenApp {
             .flex_none()
             .flex()
             .flex_col()
-            .gap_6()
+            .gap_4()
             .p_4()
             .border_r_1()
             .border_color(color::border())
@@ -621,24 +699,44 @@ impl LumenApp {
                             .child("Lumen"),
                     ),
             )
-            .child(nav)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(small_label("Pack"))
-                    .child(pack_list),
+                ui::focusable(
+                    div()
+                        .id("open-finder")
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .justify_between()
+                        .h_11()
+                        .px_3()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(color::input())
+                        .text_sm()
+                        .text_color(color::muted_foreground())
+                        .cursor_pointer()
+                        .hover(|s| s.bg(color::muted()))
+                        .child("Find")
+                        .child(ui::kbd(if cfg!(target_os = "macos") { "⌘ K" } else { "Ctrl K" })),
+                )
+                .on_click(cx.listener(|app, _, window, cx| app.toggle_finder(window, cx))),
             )
             .child(
                 div()
+                    .id("sidebar-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .gap_2()
-                    .child(small_label("Mode"))
-                    .child(modes),
+                    .gap_6()
+                    .child(nav)
+                    .child(div().flex().flex_col().gap_2().child(small_label("Shows")).child(pack_list))
+                    .child(div().flex().flex_col().gap_2().child(small_label("Mode")).child(modes)),
             )
-            .child(div().flex_1())
+            .children(matches!(&self.update, UpdateState::Ready(r) if r.available).then(|| {
+                ui::action("update-available", "Update available").on_click(cx.listener(|app, _, window, cx| app.go_to(Page::Info, window, cx)))
+            }))
             .child(
                 ui::button(
                     "open-frame",
@@ -662,36 +760,26 @@ impl LumenApp {
 }
 
 // ---------------------------------------------------------------------------------------
-// Görünüm (appearance editor)
+// Appearance editor
 // ---------------------------------------------------------------------------------------
 
 fn chip(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Stateful<Div> {
-    div()
-        .id(id)
-        .h_9()
-        .px_3()
-        .flex()
-        .items_center()
-        .rounded_lg()
-        .border_1()
-        .border_color(if active {
-            color::foreground()
-        } else {
-            color::border()
-        })
-        .bg(if active {
-            color::foreground()
-        } else {
-            color::background()
-        })
-        .text_color(if active {
-            color::background()
-        } else {
-            color::foreground()
-        })
-        .text_sm()
-        .cursor_pointer()
-        .child(label.into())
+    ui::focusable(
+        div()
+            .id(id)
+            .h_11()
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded_lg()
+            .border_1()
+            .border_color(if active { color::foreground() } else { color::input() })
+            .bg(if active { color::foreground() } else { color::background() })
+            .text_color(if active { color::background() } else { color::foreground() })
+            .text_sm()
+            .cursor_pointer()
+            .child(label.into()),
+    )
 }
 
 fn swatch(id: impl Into<ElementId>, hex: &str, active: bool) -> Stateful<Div> {
@@ -1065,12 +1153,7 @@ impl LumenApp {
                             .flex()
                             .flex_col()
                             .gap_5()
-                            .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child("Appearance"),
-                            )
+                            .child(ui::page_header("Appearance", "Choose how your show looks on screen."))
                             .child(background_card)
                             .child(colors_card)
                             .child(type_card)
@@ -1092,7 +1175,7 @@ impl LumenApp {
 }
 
 // ---------------------------------------------------------------------------------------
-// Yayın (OBS)
+// Broadcast (OBS)
 // ---------------------------------------------------------------------------------------
 
 fn hms(seconds: u64) -> String {
@@ -1293,12 +1376,7 @@ impl LumenApp {
                     .flex_col()
                     .gap_5()
                     .max_w(px(760.))
-                    .child(
-                        div()
-                            .text_xl()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Broadcast"),
-                    )
+                    .child(ui::page_header("Broadcast", "Send your show to OBS and go live."))
                     .when(!s.message.is_empty(), |d| {
                         d.child(
                             div()
@@ -1339,81 +1417,180 @@ impl LumenApp {
         .detach();
     }
 
+    fn add_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = self.new_handle.read(cx).value().trim().trim_start_matches('@').to_owned();
+        if handle.is_empty() {
+            self.accounts_error = Some("Enter the username of the account you want to connect.".into());
+            cx.notify();
+            return;
+        }
+        self.new_handle.update(cx, |s, cx| s.set_value("", window, cx));
+        self.accounts_op(Some(crate::accounts::Op::Add(self.new_platform, handle)), cx);
+    }
+
+    /// Open the platform's own login page; the user signs in there.
+    fn sign_in(&mut self, id: lumen_live::AccountId, cx: &mut Context<Self>) {
+        self.signing_in = Some(id.clone());
+        self.accounts_error = None;
+        cx.notify();
+        let task = cx.background_executor().spawn(async move { crate::accounts::sign_in(&id) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |app, cx| {
+                app.signing_in = None;
+                match result {
+                    Ok(()) => app.accounts_op(None, cx),
+                    Err(e) => app.accounts_error = Some(e),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn accounts_page(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         use crate::accounts::Op;
-        let mut list = div().flex().flex_col().gap_2();
+        use lumen_live::Platform;
+        let mut list = div().flex().flex_col().gap_4();
         for (i, a) in self.accounts.iter().enumerate() {
-            let id = a.id.clone();
-            let state = a.state.clone().unwrap_or_else(|| "not connected yet".into());
-            let tone = match state.as_str() {
-                "live" => Tone::Success,
-                "failed" => Tone::Danger,
-                "backoff" | "offline" => Tone::Warning,
-                _ => Tone::Neutral,
+            let platform = match a.platform {
+                "tiktok" => "TikTok",
+                "kwai_global" => "Kwai",
+                "likee_global" => "Likee",
+                other => other,
             };
+            let (status, tone) = match a.state.as_deref() {
+                Some("live") => ("Live", Tone::Success),
+                Some("failed") => ("Failed", Tone::Danger),
+                Some("backoff") => ("Reconnecting", Tone::Warning),
+                Some("offline") => ("Offline", Tone::Warning),
+                Some("connecting") => ("Connecting", Tone::Neutral),
+                _ => ("Not connected", Tone::Neutral),
+            };
+            let key = |name: &str| SharedString::from(format!("conn-{name}-{i}"));
+            let id = a.id.clone();
+
+            let waiting = self.signing_in.as_ref() == Some(&a.id);
+            let sign_in_value = if waiting {
+                "Finish signing in in the browser window, or close it to cancel"
+            } else if a.signed_in {
+                "Signed in"
+            } else {
+                "Not signed in"
+            };
+            let sign_in_action = self.signing_in.is_none().then(|| {
+                let id = id.clone();
+                ui::action(key("sign-in"), if a.signed_in { "Sign in again" } else { "Sign in" })
+                    .on_click(cx.listener(move |app, _, _, cx| app.sign_in(id.clone(), cx)))
+                    .into_any_element()
+            });
+
+            let live = a.live;
+            let live_value = match (live, a.events) {
+                (false, _) => "Off".to_owned(),
+                (true, Some(n)) => format!("On, {n} events received"),
+                (true, None) => "On".to_owned(),
+            };
+            let live_action = {
+                let id = id.clone();
+                ui::action(key("live"), if live { "Turn off" } else { "Turn on" })
+                    .on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Live(id.clone(), !live)), cx)))
+                    .into_any_element()
+            };
+
+            let confirming_auth = self.confirm_authorize.as_ref() == Some(&a.id);
+            let (broadcast_value, broadcast_action) = if confirming_auth {
+                let id = id.clone();
+                (
+                    "Do you own this account, or have permission to stream to it?",
+                    ui::action(key("bc"), "Yes, authorize")
+                        .on_click(cx.listener(move |app, _, _, cx| {
+                            app.confirm_authorize = None;
+                            app.accounts_op(Some(Op::Authorize(id.clone(), true)), cx);
+                        }))
+                        .into_any_element(),
+                )
+            } else if !a.authorized {
+                let id = id.clone();
+                (
+                    "Not authorized",
+                    ui::action(key("bc"), "Authorize")
+                        .on_click(cx.listener(move |app, _, _, cx| {
+                            app.confirm_authorize = Some(id.clone());
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                )
+            } else {
+                let (id, on) = (id.clone(), a.broadcast);
+                (
+                    if on { "On" } else { "Authorized, off" },
+                    ui::action(key("bc"), if on { "Turn off" } else { "Turn on" })
+                        .on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Broadcast(id.clone(), !on)), cx)))
+                        .into_any_element(),
+                )
+            };
+
+            let active_action = (!a.active).then(|| {
+                let id = id.clone();
+                ui::action(key("use"), "Make active")
+                    .on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Use(id.clone())), cx)))
+                    .into_any_element()
+            });
+
             let confirming = self.confirm_remove.as_ref() == Some(&a.id);
-            let (live_id, bc_id, rm_id, use_id) = (id.clone(), id.clone(), id.clone(), id.clone());
-            let (live, broadcast) = (a.live, a.broadcast);
-            let row = div()
-                .id(SharedString::from(format!("acct-row-{i}")))
+            let remove = ui::action(key("rm"), if confirming { "Yes, remove this connection and its sign-in" } else { "Remove" })
+                .text_color(color::danger())
+                .on_click(cx.listener(move |app, _, _, cx| {
+                    if app.confirm_remove.as_ref() == Some(&id) {
+                        app.confirm_remove = None;
+                        app.accounts_op(Some(Op::Remove(id.clone())), cx);
+                    } else {
+                        app.confirm_remove = Some(id.clone());
+                        cx.notify();
+                    }
+                }));
+
+            list = list.child(
+                ui::summary_card(a.label.clone(), format!("{platform} @{}", a.handle), Some(ui::badge(status, tone)))
+                    .child(ui::summary_row("Sign-in", sign_in_value, sign_in_action))
+                    .child(ui::summary_row("LIVE events", live_value, Some(live_action)))
+                    .child(ui::summary_row("Broadcasting", broadcast_value, Some(broadcast_action)))
+                    .child(ui::summary_row("Active account", if a.active { "Yes" } else { "No" }, active_action))
+                    .child(div().flex().justify_end().border_t_1().border_color(color::border()).child(remove)),
+            );
+        }
+        let mut platforms = div().flex().gap_2();
+        for (i, (name, platform)) in [("Kwai", Platform::KwaiGlobal), ("TikTok", Platform::TikTok), ("Likee", Platform::LikeeGlobal)].into_iter().enumerate() {
+            platforms = platforms.child(chip(SharedString::from(format!("conn-platform-{i}")), name, self.new_platform == platform).on_click(cx.listener(move |app, _, _, cx| {
+                app.new_platform = platform;
+                cx.notify();
+            })));
+        }
+        let add = ui::card("Add a connection", None)
+            .child(div().flex().flex_col().gap_2().child(small_label("Platform")).child(platforms))
+            .child(div().flex().flex_col().gap_2().child(small_label("Username")).child(Input::new(&self.new_handle)))
+            .child(div().flex().child(ui::primary("conn-add", "Add connection", true).on_click(cx.listener(|app, _, window, cx| app.add_connection(window, cx)))));
+        let your = div()
+            .flex()
+            .items_center()
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(format!("Your connections ({})", self.accounts.len())))
+            .child(div().flex_1())
+            .child(ui::action("conn-refresh", "Refresh").on_click(cx.listener(|app, _, _, cx| app.accounts_op(None, cx))));
+        div().id("accounts-scroll").size_full().overflow_y_scroll().child(
+            div()
+                .p_6()
                 .flex()
                 .flex_col()
-                .gap_2()
-                .px_4()
-                .py_3()
-                .rounded_lg()
-                .border_1()
-                .border_color(if a.active { color::foreground() } else { color::border() })
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .child(div().font_weight(FontWeight::MEDIUM).child(a.label.clone()))
-                        .child(div().text_sm().font_family(ui::MONO).text_color(color::muted_foreground()).child(format!("{} @{}", a.platform, a.handle)))
-                        .children(a.group.clone().map(|g| ui::badge(g, Tone::Info)))
-                        .children(a.active.then(|| ui::badge("active", Tone::Success)))
-                        .children((!a.enabled).then(|| ui::badge("disabled", Tone::Neutral)))
-                        .child(div().flex_1())
-                        .child(ui::badge(match a.events { Some(n) => format!("{state} · {n} events"), None => state.clone() }, tone)),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(chip(SharedString::from(format!("acct-use-{i}")), if a.active { "Active" } else { "Make active" }, a.active).on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Use(use_id.clone())), cx))))
-                        .child(chip(SharedString::from(format!("acct-live-{i}")), if live { "LIVE events on" } else { "LIVE events off" }, live).on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Live(live_id.clone(), !live)), cx))))
-                        .child(if a.authorized {
-                            chip(SharedString::from(format!("acct-bc-{i}")), if broadcast { "Broadcast on" } else { "Broadcast off" }, broadcast).on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Broadcast(bc_id.clone(), !broadcast)), cx)))
-                        } else {
-                            div().id(SharedString::from(format!("acct-bc-{i}"))).text_xs().text_color(color::muted_foreground()).child("Broadcast: not authorized")
-                        })
-                        .child(div().flex_1())
-                        .child(chip(SharedString::from(format!("acct-rm-{i}")), if confirming { "Confirm remove" } else { "Remove" }, confirming).on_click(cx.listener(move |app, _, _, cx| {
-                            if app.confirm_remove.as_ref() == Some(&rm_id) {
-                                app.confirm_remove = None;
-                                app.accounts_op(Some(Op::Remove(rm_id.clone())), cx);
-                            } else {
-                                app.confirm_remove = Some(rm_id.clone());
-                                cx.notify();
-                            }
-                        }))),
-                );
-            list = list.child(row);
-        }
-        let body = ui::card(
-            "Account Center",
-            Some("TikTok, Kwai Global and Likee Global accounts. Add accounts, secrets and broadcast authorization with `lumen-live accounts`; run them with `lumen-live connect`."),
+                .gap_5()
+                .max_w(px(900.))
+                .child(ui::page_header("Connections", "Add the accounts Lumen reads and streams to. You sign in yourself on each platform's own page; Lumen never sees your password and keeps only an encrypted session."))
+                .children(self.accounts_error.clone().map(ui::error_summary))
+                .child(add)
+                .child(your)
+                .children(self.accounts.is_empty().then(|| div().text_sm().text_color(color::muted_foreground()).child("You have no connections yet.")))
+                .child(list),
         )
-        .children(self.accounts_error.clone().map(|e| div().text_sm().text_color(color::danger()).child(e)))
-        .children(self.accounts.is_empty().then(|| div().text_sm().text_color(color::muted_foreground()).child("No accounts yet: lumen-live accounts add --platform kwai --label NAME --handle HANDLE")))
-        .child(list)
-        .child(chip("acct-refresh", "Refresh", false).on_click(cx.listener(|app, _, _, cx| app.accounts_op(None, cx))));
-        div()
-            .id("accounts-scroll")
-            .size_full()
-            .overflow_y_scroll()
-            .child(div().p_6().flex().flex_col().gap_5().max_w(px(900.)).child(div().text_xl().font_weight(FontWeight::MEDIUM).child("Accounts")).child(body))
     }
 }
 
@@ -1559,12 +1736,7 @@ impl LumenApp {
                             .items_end()
                             .justify_between()
                             .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(div().text_xl().font_weight(FontWeight::MEDIUM).child("Questions"))
-                                    .child(small_label(&summary)),
+                                ui::page_header("Questions", &summary),
                             )
                             .child(
                                 ui::button("apply-questions", "Apply to broadcast", "↵", ui::Variant::Active, true)
@@ -1578,6 +1750,10 @@ impl LumenApp {
                     .when(!self.notice.is_empty(), |d| {
                         d.child(div().text_sm().text_color(color::muted_foreground()).child(self.notice.clone()))
                     })
+                    .child(
+                        ui::card("Show name", Some("Viewers see this on screen. Press Enter to save."))
+                            .child(Input::new(&self.show_name)),
+                    )
                     .child(
                         ui::card(
                             "Session",
@@ -1773,6 +1949,9 @@ fn is_image(path: &Path) -> bool {
 
 impl Render for LumenApp {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.onboarding.is_some() {
+            return div().size_full().bg(color::background()).font_family(ui::FONT).text_color(color::foreground()).child(self.onboarding_page(cx)).into_any_element();
+        }
         let content: AnyElement = match self.page {
             Page::Rehearsal => self.rehearsal.clone().into_any_element(),
             Page::Control => self.control.clone().into_any_element(),
@@ -1780,44 +1959,417 @@ impl Render for LumenApp {
             Page::Broadcast => self.broadcast(cx).into_any_element(),
             Page::Questions => self.questions(cx).into_any_element(),
             Page::Accounts => self.accounts_page(cx).into_any_element(),
+            Page::Info => self.info_page(cx).into_any_element(),
         };
-
         div()
+            .relative()
             .size_full()
             .flex()
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|app, event: &KeyDownEvent, window, cx| {
-                let k = &event.keystroke;
-                if !k.modifiers.control {
-                    return;
-                }
-                let target = match k.key.as_str() {
-                    "1" => Page::Rehearsal,
-                    "2" => Page::Questions,
-                    "3" => Page::Control,
-                    "4" => Page::Look,
-                    "5" => Page::Broadcast,
-                    "6" => Page::Accounts,
-                    _ => return,
-                };
-                app.page = target;
-                if target == Page::Accounts {
-                    app.accounts_op(None, cx);
-                }
-                let focus = match target {
-                    Page::Rehearsal => app.rehearsal.read(cx).focus.clone(),
-                    Page::Control => app.control.read(cx).focus.clone(),
-                    Page::Look | Page::Broadcast | Page::Questions | Page::Accounts => app.focus.clone(),
-                };
-                window.focus(&focus);
-                cx.stop_propagation();
-                cx.notify();
-            }))
+            .on_action(cx.listener(|app, _: &ToggleFinder, window, cx| app.toggle_finder(window, cx)))
             .bg(color::background())
             .font_family(ui::FONT)
             .text_color(color::foreground())
             .child(self.sidebar(cx))
             .child(div().flex_1().h_full().overflow_hidden().child(content))
+            .children(self.finder.is_some().then(|| self.finder_overlay(cx)))
+            .into_any_element()
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Find (Ctrl K / Cmd K)
+// ---------------------------------------------------------------------------------------
+
+impl LumenApp {
+    fn go_to(&mut self, target: Page, window: &mut Window, cx: &mut Context<Self>) {
+        self.page = target;
+        if target == Page::Accounts {
+            self.accounts_op(None, cx);
+        }
+        let focus = match target {
+            Page::Rehearsal => self.rehearsal.read(cx).focus.clone(),
+            Page::Control => self.control.read(cx).focus.clone(),
+            Page::Look | Page::Broadcast | Page::Questions | Page::Accounts | Page::Info => self.focus.clone(),
+        };
+        window.focus(&focus);
+        cx.notify();
+    }
+
+    fn select_show(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pack != index {
+            self.pack = index;
+            let title = self.pack_titles.get(index).cloned().unwrap_or_default();
+            self.show_name.update(cx, |s, cx| s.set_value(title, window, cx));
+            self.restart();
+            cx.notify();
+        }
+    }
+
+    fn rename_show(&mut self, name: &str, cx: &mut Context<Self>) {
+        let Some(path) = self.packs.get(self.pack).cloned() else { return };
+        match crate::product::rename_show(&path, name) {
+            Ok(()) => {
+                self.pack_titles[self.pack] = name.trim().to_owned();
+                self.restart();
+            }
+            Err(e) => self.accounts_error = Some(e),
+        }
+        cx.notify();
+    }
+
+    fn commands(&self) -> Vec<(String, &'static str, FindAction)> {
+        let mut list: Vec<(String, &'static str, FindAction)> = [
+            ("Rehearsal", Page::Rehearsal),
+            ("Questions", Page::Questions),
+            ("Control", Page::Control),
+            ("Appearance", Page::Look),
+            ("Broadcast", Page::Broadcast),
+            ("Connections", Page::Accounts),
+            ("Info", Page::Info),
+        ]
+        .into_iter()
+        .map(|(name, page)| (name.to_owned(), "Page", FindAction::Go(page)))
+        .collect();
+        list.push(("Add a connection".into(), "Connections", FindAction::Go(Page::Accounts)));
+        list.push(("Sign in to an account".into(), "Connections", FindAction::Go(Page::Accounts)));
+        list.push(("Rename this show".into(), "Questions", FindAction::Go(Page::Questions)));
+        list.push(("Open the broadcast frame".into(), "OBS", FindAction::Frame));
+        list.push(("Check for updates".into(), "Info", FindAction::CheckUpdates));
+        for mode in [Mode::Models, Mode::Scripted, Mode::Live] {
+            list.push((format!("Switch to {}", mode.label()), "Mode", FindAction::Mode(mode)));
+        }
+        for (i, title) in self.pack_titles.iter().enumerate() {
+            list.push((title.clone(), "Show", FindAction::Show(i)));
+        }
+        list
+    }
+
+    fn found(&self, cx: &App) -> Vec<(String, &'static str, FindAction)> {
+        let query = self.finder_input.read(cx).value().to_string();
+        self.commands().into_iter().filter(|(title, hint, _)| crate::product::matches(&query, &format!("{title} {hint}"))).collect()
+    }
+
+    fn toggle_finder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.onboarding.is_some() {
+            return;
+        }
+        if self.finder.take().is_some() {
+            window.focus(&self.focus);
+        } else {
+            self.finder = Some(Finder { selected: 0 });
+            self.finder_input.update(cx, |s, cx| {
+                s.set_value("", window, cx);
+                s.focus(window, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    fn run_command(&mut self, command: FindAction, window: &mut Window, cx: &mut Context<Self>) {
+        self.finder = None;
+        window.focus(&self.focus);
+        match command {
+            FindAction::Go(page) => self.go_to(page, window, cx),
+            FindAction::Show(index) => self.select_show(index, window, cx),
+            FindAction::Mode(mode) => {
+                if self.mode != mode {
+                    self.mode = mode;
+                    self.restart();
+                }
+            }
+            FindAction::Frame => rehearsal::open(self.socket.clone(), Layout::Stage, cx),
+            FindAction::CheckUpdates => {
+                self.go_to(Page::Info, window, cx);
+                self.check_update(cx);
+            }
+        }
+        cx.notify();
+    }
+
+    fn run_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selected) = self.finder.as_ref().map(|f| f.selected) else { return };
+        if let Some((_, _, command)) = self.found(cx).into_iter().nth(selected) {
+            self.run_command(command, window, cx);
+        }
+    }
+
+    fn finder_overlay(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let found = self.found(cx);
+        let selected = self.finder.as_ref().map_or(0, |f| f.selected);
+        let total = found.len();
+        let mut rows = div().flex().flex_col();
+        for (i, (title, hint, command)) in found.into_iter().enumerate().take(8) {
+            rows = rows.child(
+                div()
+                    .id(SharedString::from(format!("find-{i}")))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .h_11()
+                    .px_3()
+                    .rounded_lg()
+                    .text_sm()
+                    .cursor_pointer()
+                    .when(i == selected, |d| d.bg(color::muted()))
+                    .hover(|s| s.bg(color::muted()))
+                    .child(title)
+                    .child(div().text_xs().text_color(color::muted_foreground()).child(hint))
+                    .on_click(cx.listener(move |app, _, window, cx| app.run_command(command.clone(), window, cx))),
+            );
+        }
+        div()
+            .id("finder-backdrop")
+            .absolute()
+            .inset_0()
+            .flex()
+            .justify_center()
+            .items_start()
+            .pt(px(96.))
+            .bg(rgba(0x000000b3))
+            .occlude()
+            .on_click(cx.listener(|app, _, window, cx| {
+                app.finder = None;
+                window.focus(&app.focus);
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id("finder")
+                    .w(px(560.))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded_xl()
+                    .bg(color::card())
+                    .border_1()
+                    .border_color(color::input())
+                    .occlude()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .capture_key_down(cx.listener(move |app, event: &KeyDownEvent, window, cx| {
+                        let Some(finder) = &mut app.finder else { return };
+                        let limit = total.min(8);
+                        match event.keystroke.key.as_str() {
+                            "escape" => {
+                                app.finder = None;
+                                window.focus(&app.focus);
+                            }
+                            "down" if limit > 0 => finder.selected = (finder.selected + 1) % limit,
+                            "up" if limit > 0 => finder.selected = (finder.selected + limit - 1) % limit,
+                            _ => return,
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
+                    .child(Input::new(&self.finder_input))
+                    .when(total == 0, |d| d.child(div().px_3().py_3().text_sm().text_color(color::muted_foreground()).child("Nothing found.")))
+                    .child(rows),
+            )
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// First-run guide
+// ---------------------------------------------------------------------------------------
+
+impl LumenApp {
+    fn onboarding_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(guide) = &mut self.onboarding else { return };
+        let text = |input: &Entity<InputState>, cx: &App| input.read(cx).value().trim().to_owned();
+        guide.error = None;
+        let name = text(&guide.name, cx);
+        let question = text(&guide.question, cx);
+        let (a, b) = (text(&guide.host_a, cx), text(&guide.host_b, cx));
+        guide.error = match guide.step {
+            1 if name.is_empty() => Some("Enter a name for your show.".to_owned()),
+            2 if question.is_empty() => Some("Enter a question for your hosts to debate.".to_owned()),
+            3 if a.is_empty() || b.is_empty() => Some("Enter a name for both hosts.".to_owned()),
+            3 if a.eq_ignore_ascii_case(&b) => Some("Give your hosts two different names.".to_owned()),
+            _ => None,
+        };
+        if guide.error.is_some() {
+            cx.notify();
+            return;
+        }
+        if guide.step == 3 {
+            match crate::product::create_show(&data_dir().join("packs/personas"), &name, &question, [&a, &b]) {
+                Ok(path) => {
+                    self.packs = packs();
+                    self.pack_titles = self.packs.iter().map(|p| crate::product::show_title(p)).collect();
+                    self.pack = self.packs.iter().position(|p| *p == path).unwrap_or(0);
+                    self.show_name.update(cx, |s, cx| s.set_value(name.clone(), window, cx));
+                    self.restart();
+                }
+                Err(e) => {
+                    if let Some(guide) = &mut self.onboarding {
+                        guide.error = Some(format!("Your show could not be saved: {e}"));
+                    }
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+        let Some(guide) = &mut self.onboarding else { return };
+        guide.step += 1;
+        let next = match guide.step {
+            1 => Some(guide.name.clone()),
+            2 => Some(guide.question.clone()),
+            3 => Some(guide.host_a.clone()),
+            _ => None,
+        };
+        if let Some(input) = next {
+            input.update(cx, |s, cx| s.focus(window, cx));
+        }
+        cx.notify();
+    }
+
+    fn finish_onboarding(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        if let Err(e) = crate::product::set_onboarded() {
+            self.accounts_error = Some(e);
+        }
+        self.onboarding = None;
+        self.go_to(page, window, cx);
+    }
+
+    fn onboarding_page(&self, cx: &mut Context<Self>) -> Div {
+        let Some(guide) = &self.onboarding else { return div() };
+        let field = |label: &str, input: &Entity<InputState>| div().flex().flex_col().gap_2().child(small_label(label)).child(Input::new(input));
+        let (title, lead, fields): (&str, &str, Vec<Div>) = match guide.step {
+            0 => ("Welcome to Lumen", "Lumen runs two AI hosts who debate live, answer your viewers and stream to TikTok, Kwai and Likee. Let's set up your first show. It takes about a minute.", vec![]),
+            1 => ("What is your show called?", "Viewers see this on screen. You can change it any time.", vec![field("Show name", &guide.name)]),
+            2 => ("What should they debate first?", "Write it as a question. You can add more later.", vec![field("First question", &guide.question)]),
+            3 => ("Who are your two hosts?", "One argues yes, the other argues no. You can change their style later.", vec![field("First host", &guide.host_a), field("Second host", &guide.host_b)]),
+            _ => ("Your show is ready", "Try a rehearsal first: nothing goes live until you choose to. To stream, connect your accounts and sign in.", vec![]),
+        };
+        let finished = guide.step > 3;
+        let label = match guide.step {
+            0 => "Get started",
+            3 => "Create show",
+            _ if finished => "Start rehearsal",
+            _ => "Continue",
+        };
+        let actions = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(ui::primary("guide-next", label, true).on_click(cx.listener(move |app, _, window, cx| {
+                if finished {
+                    app.finish_onboarding(Page::Rehearsal, window, cx);
+                } else {
+                    app.onboarding_next(window, cx);
+                }
+            })))
+            .when(finished, |d| d.child(ui::action("guide-connect", "Connect an account").on_click(cx.listener(|app, _, window, cx| app.finish_onboarding(Page::Accounts, window, cx)))))
+            .when((1..=3).contains(&guide.step), |d| {
+                d.child(ui::action("guide-back", "Back").on_click(cx.listener(|app, _, _, cx| {
+                    if let Some(guide) = &mut app.onboarding {
+                        guide.step -= 1;
+                        guide.error = None;
+                    }
+                    cx.notify();
+                })))
+            })
+            .when(guide.step == 0, |d| d.child(ui::action("guide-skip", "Skip for now").on_click(cx.listener(|app, _, window, cx| app.finish_onboarding(Page::Rehearsal, window, cx)))));
+        div().size_full().flex().items_center().justify_center().child(
+            div()
+                .w(px(480.))
+                .flex()
+                .flex_col()
+                .gap_6()
+                .child(ui::mark(56.))
+                .when((1..=3).contains(&guide.step), |d| d.child(small_label(&format!("Step {} of 3", guide.step))))
+                .child(ui::page_header(title, lead))
+                .children(guide.error.clone().map(ui::error_summary))
+                .children(fields)
+                .child(actions),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Info and updates
+// ---------------------------------------------------------------------------------------
+
+impl LumenApp {
+    pub fn check_update(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.update, UpdateState::Checking | UpdateState::Installing) {
+            return;
+        }
+        self.update = UpdateState::Checking;
+        cx.notify();
+        let task = cx.background_executor().spawn(async { crate::product::check_update() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |app, cx| {
+                app.update = match result {
+                    Ok(release) => UpdateState::Ready(release),
+                    Err(e) => UpdateState::Failed(e),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn install_update(&mut self, cx: &mut Context<Self>) {
+        self.update = UpdateState::Installing;
+        cx.notify();
+        let task = cx.background_executor().spawn(async { crate::product::install_update() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |app, cx| {
+                app.update = match result {
+                    Ok(()) => UpdateState::Installed,
+                    Err(e) => UpdateState::Failed(e),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn info_page(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        use crate::product::{REPOSITORY_URL, VERSION};
+        let link = |id: &'static str, label: &'static str, url: String, cx: &mut Context<Self>| ui::action(id, label).on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))).into_any_element();
+        let check = |label: &'static str, cx: &mut Context<Self>| ui::action("update-check", label).on_click(cx.listener(|app, _, _, cx| app.check_update(cx))).into_any_element();
+        let (status, action): (String, Option<AnyElement>) = match &self.update {
+            UpdateState::Idle => ("Not checked yet".into(), Some(check("Check for updates", cx))),
+            UpdateState::Checking => ("Checking GitHub…".into(), None),
+            UpdateState::Installing => ("Installing the update…".into(), None),
+            UpdateState::Installed => ("Updated. Restart Lumen to use the new version.".into(), None),
+            UpdateState::Failed(e) => (e.clone(), Some(check("Try again", cx))),
+            UpdateState::Ready(r) if r.available => (
+                format!("Lumen {} is available", r.tag),
+                Some(ui::primary("update-install", "Install update", true).on_click(cx.listener(|app, _, _, cx| app.install_update(cx))).into_any_element()),
+            ),
+            UpdateState::Ready(_) => ("You have the latest version".into(), Some(check("Check again", cx))),
+        };
+        let release = match &self.update {
+            UpdateState::Ready(r) => Some(r.clone()),
+            _ => None,
+        };
+        let repository = link("info-github", "View on GitHub", REPOSITORY_URL.to_owned(), cx);
+        let issues = link("info-issues", "Report a problem", format!("{REPOSITORY_URL}/issues"), cx);
+        let about = div()
+            .flex()
+            .items_center()
+            .gap_4()
+            .child(ui::mark(64.))
+            .child(ui::page_header("Lumen", "AI hosts that debate live and answer your viewers."));
+        let details = ui::summary_card("About this app", "", None)
+            .child(ui::summary_row("Version", VERSION.to_owned(), None))
+            .child(ui::summary_row("Updates", status, action))
+            .child(ui::summary_row("Source code", "OnurByte/Lumen", Some(repository)))
+            .child(ui::summary_row("Help", "Something not working?", Some(issues)))
+            .child(ui::summary_row("Your data", data_dir().display().to_string(), None));
+        let notes = release.map(|r| {
+            let url = r.url.clone();
+            ui::summary_card(format!("What's new in {}", r.tag), r.published.clone(), None)
+                .child(div().pt_3().border_t_1().border_color(color::border()).text_sm().text_color(color::muted_foreground()).child(if r.notes.is_empty() { "No release notes.".to_owned() } else { r.notes.clone() }))
+                .when(!url.is_empty(), |d| d.child(div().flex().justify_end().child(ui::action("info-release", "Read on GitHub").on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))))))
+        });
+        div().id("info-scroll").size_full().overflow_y_scroll().child(div().p_6().flex().flex_col().gap_5().max_w(px(760.)).child(about).child(details).children(notes))
     }
 }
 
@@ -1850,6 +2402,7 @@ mod interaction {
             std::env::set_var("LUMEN_HOME", repo);
             std::env::set_var("LUMEN_DAEMON", "/bin/true");
             std::env::remove_var("LUMEN_PAGE");
+            std::env::set_var("LUMEN_NO_ONBOARDING", "1");
         }
         dir
     }
@@ -1889,6 +2442,68 @@ mod interaction {
         vcx.simulate_click(bounds.center(), Modifiers::none());
         vcx.run_until_parked();
         bounds
+    }
+
+    #[gpui::test]
+    fn ctrl_k_finds_and_opens_a_page_and_escape_closes(cx: &mut TestAppContext) {
+        let _env = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = sandbox("finder");
+        let (app, vcx) = open(cx, &dir, Page::Look);
+        vcx.update(|_, cx| cx.bind_keys([KeyBinding::new("secondary-k", ToggleFinder, None)]));
+        app.update_in(vcx, |a, window, _| window.focus(&a.focus));
+        vcx.simulate_keystrokes("ctrl-k");
+        vcx.run_until_parked();
+        assert!(app.read_with(vcx, |a, _| a.finder.is_some()), "Ctrl K opens Find");
+        vcx.simulate_keystrokes("escape");
+        vcx.run_until_parked();
+        assert!(app.read_with(vcx, |a, _| a.finder.is_none()), "Escape closes Find");
+        vcx.simulate_keystrokes("ctrl-k");
+        vcx.simulate_input("info");
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("enter");
+        vcx.run_until_parked();
+        assert!(app.read_with(vcx, |a, _| a.finder.is_none() && a.page == Page::Info), "Enter runs the match");
+    }
+
+    #[gpui::test]
+    fn first_run_guide_requires_answers_and_creates_the_named_show(cx: &mut TestAppContext) {
+        let _env = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = sandbox("guide");
+        unsafe {
+            std::env::remove_var("LUMEN_NO_ONBOARDING");
+            std::env::set_var("LUMEN_HOME", &dir);
+        }
+        let (app, vcx) = open(cx, &dir, Page::Rehearsal);
+        unsafe { std::env::set_var("LUMEN_NO_ONBOARDING", "1") };
+        assert!(app.read_with(vcx, |a, _| a.onboarding.is_some()), "shown on first run");
+        let next = |vcx: &mut VisualTestContext| {
+            app.update_in(vcx, |a, window, cx| a.onboarding_next(window, cx));
+            vcx.run_until_parked();
+        };
+        let step = |vcx: &mut VisualTestContext| app.read_with(vcx, |a, _| a.onboarding.as_ref().map_or(99, |g| g.step));
+        next(vcx);
+        next(vcx);
+        assert_eq!(step(vcx), 1, "an empty name does not advance");
+        for text in ["Sunday Debate", "Is cereal soup?"] {
+            vcx.simulate_input(text);
+            vcx.run_until_parked();
+            next(vcx);
+        }
+        assert_eq!(step(vcx), 3);
+        vcx.simulate_input("Ada");
+        app.update_in(vcx, |a, window, cx| {
+            let host = a.onboarding.as_ref().unwrap().host_b.clone();
+            host.update(cx, |s, cx| s.set_value("Max", window, cx));
+        });
+        vcx.run_until_parked();
+        next(vcx);
+        assert_eq!(step(vcx), 4);
+        let show = dir.join("packs/personas/sunday-debate.toml");
+        assert!(show.is_file());
+        assert_eq!(crate::product::show_title(&show), "Sunday Debate");
+        app.update_in(vcx, |a, window, cx| a.finish_onboarding(Page::Rehearsal, window, cx));
+        vcx.run_until_parked();
+        assert!(crate::product::onboarded(), "not shown again");
     }
 
     fn saved_theme(dir: &Path) -> String {
@@ -1984,20 +2599,20 @@ mod interaction {
         assert!(before > 0, "the pack seeds the session");
 
         click(vcx, "question-input");
-        vcx.simulate_input("Cumhuriyet kime kazandırdı?");
+        vcx.simulate_input("Who benefits most from this?");
         vcx.simulate_keystrokes("enter");
         let questions = app.read_with(vcx, |app, _| app.session.questions.clone());
         assert_eq!(questions.len(), before + 1);
-        assert_eq!(questions.last().unwrap(), "Cumhuriyet kime kazandırdı?");
+        assert_eq!(questions.last().unwrap(), "Who benefits most from this?");
         let input = app.read_with(vcx, |app, _| app.question_input.clone());
         assert_eq!(
             input.read_with(vcx, |i, _| i.value().to_string()),
             "",
             "input clears"
         );
-        let saved = std::fs::read_to_string(dir.join("lumen/sessions/hakikat-arayisi.toml"))
+        let saved = std::fs::read_to_string(dir.join("lumen/sessions/00-starter-debate.toml"))
             .expect("session saved");
-        assert!(saved.contains("Cumhuriyet kime kazandırdı?"));
+        assert!(saved.contains("Who benefits most from this?"));
 
         // Click a question: it loads into the input; Enter replaces it instead of appending.
         click(vcx, "question-0");

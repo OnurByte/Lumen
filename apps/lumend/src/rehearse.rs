@@ -150,12 +150,12 @@ impl ScriptedModel {
 /// Neutral natural lines used only when a character has no skill sheet yet.
 fn fallback_lines() -> Vec<String> {
     [
-        "Bakın, bu meseleye tek cümleyle bakarsak işin özünü kaçırırız.",
-        "Haklı olduğunuz bir nokta var, kabul ediyorum; ama sonuca katılmıyorum.",
-        "Somut bir örnekle gidelim, yoksa havada konuşuyoruz.",
-        "Bilmediğim bir şeyi biliyormuş gibi yapmayacağım; ama mantığım şu.",
-        "Bir dakika, bunu biraz daha sade anlatayım.",
-        "Herkesin evinde bunun bir örneği vardır aslında.",
+        "Look, if we reduce this to one sentence we miss the whole point.",
+        "You have a point, I admit it, but I reject your conclusion.",
+        "Let's take a concrete example, or we're just talking in the air.",
+        "I won't pretend to know what I don't, but here is my reasoning.",
+        "Hold on, let me put this more simply.",
+        "Everyone has an example of this at home.",
     ]
     .map(String::from)
     .to_vec()

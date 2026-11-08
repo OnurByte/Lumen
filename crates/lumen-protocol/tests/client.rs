@@ -60,7 +60,7 @@ fn stage_snapshot_is_versioned_and_roundtrips() {
             avatars: ["ogretmen".into(), "fesli".into()],
             thinking: None,
             phase: "ÇAPRAZ SORGU".into(),
-            show: "Hakikat Arayışı".into(),
+            show: "My show".into(),
             session_elapsed_s: 125,
             session_total_s: 5400,
             finished: false,

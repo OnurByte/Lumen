@@ -1,25 +1,23 @@
 #!/bin/sh
-# lumen — Linux launcher for the Lumen debate studio.
+# lumen: command-line launcher for Lumen.
 #
-#   lumen                      open the Lumen app (prova, kontrol, görünüm in one window)
-#   lumen prova [PACK]         rehearsal room (no TikTok, no TTS); --senaryo = no model
-#   lumen yayin [PACK]         live: TTS + audio, clean 9:16 frame for OBS + Studio
-#   lumen studio               operator control room for a running show
-#   lumen paketler             list installed packs
-#   lumen uret persona|skill|avatar [--force]   regenerate with codex
-#   lumen uret inceleme        GPT quality review of every pack (reports in packs/reviews)
-#   lumen uret iyilestir       review -> regenerate with editor notes until every pack passes
-#   lumen durum                show runtime status
+#   lumen                 open the Lumen app
+#   lumen rehearse [SHOW] rehearsal room, nothing goes live (--scripted: no AI needed)
+#   lumen live [SHOW]     go live: voice and audio, 9:16 frame for OBS, control room
+#   lumen shows           list your shows
+#   lumen status          show what is running
+#   lumen update          install the latest version (--check, --rollback)
+#   lumen info            version and folders
+#   lumen generate persona|skill|avatar|review|refine [--force]   author shows with codex
 #
-# PACK is a name from `lumen paketler` or a path to a .toml file.
+# SHOW is a name from `lumen shows` or a path to a .toml file.
 set -eu
 
 DATA="${LUMEN_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/lumen}"
 PACKS="$DATA/packs"
-RUNTIME="${XDG_RUNTIME_DIR:-/tmp/lumen-$(id -u)}/lumen"
+RUNTIME="${XDG_RUNTIME_DIR:-/tmp}/lumen"
 SOCKET="$RUNTIME/control.sock"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/lumen"
-DEFAULT_PACK="${LUMEN_PACK:-hakikat-arayisi}"
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -28,13 +26,22 @@ fail() {
 }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-[ "$(uname -s)" = Linux ] || fail "Lumen only runs on Linux"
 have lumend || fail "lumend not found on PATH; run the installer again"
 
-pack_path() {
+default_show() {
+    if [ -n "${LUMEN_PACK:-}" ]; then printf '%s' "$LUMEN_PACK"; return; fi
+    for f in "$PACKS"/personas/*.toml; do
+        [ -f "$f" ] || continue
+        basename "$f" .toml
+        return
+    done
+    fail "you have no shows yet; open Lumen to create one"
+}
+
+show_path() {
     case "$1" in
-        */* | *.toml) [ -f "$1" ] || fail "pack not found: $1"; printf '%s' "$1" ;;
-        *) [ -f "$PACKS/personas/$1.toml" ] || fail "unknown pack '$1' (see: lumen paketler)"
+        */* | *.toml) [ -f "$1" ] || fail "show not found: $1"; printf '%s' "$1" ;;
+        *) [ -f "$PACKS/personas/$1.toml" ] || fail "unknown show '$1' (see: lumen shows)"
            printf '%s' "$PACKS/personas/$1.toml" ;;
     esac
 }
@@ -45,7 +52,7 @@ running() { lumend control "$SOCKET" status >/dev/null 2>&1; }
 
 start_daemon() { # $@ = lumend arguments
     if running; then
-        fail "a show is already running ($SOCKET). Stop it first: lumend control $SOCKET stop, then close it"
+        fail "a show is already running ($SOCKET). Stop it first: lumend control $SOCKET stop"
     fi
     mkdir -p "$RUNTIME" "$STATE"
     chmod 700 "$RUNTIME"
@@ -63,32 +70,32 @@ start_daemon() { # $@ = lumend arguments
 }
 
 need_codex() {
-    have codex || fail "this needs the codex CLI signed in to your ChatGPT account (npm i -g @openai/codex && codex login)"
+    have codex || fail "this needs the codex CLI signed in to your ChatGPT account (npm i -g @openai/codex && codex login), or use: lumen rehearse --scripted"
 }
 
 command="${1:-app}"
 [ $# -gt 0 ] && shift
 case "$command" in
-    app)
+    app | studio)
         exec lumen-studio "$SOCKET"
         ;;
-    prova | rehearse)
+    rehearse)
         mode=--models
-        pack="$DEFAULT_PACK"
+        show=""
         for arg in "$@"; do
             case "$arg" in
-                --senaryo) mode="" ;;
-                *) pack="$arg" ;;
+                --scripted) mode="" ;;
+                *) show="$arg" ;;
             esac
         done
-        file="$(pack_path "$pack")"
+        file="$(show_path "${show:-$(default_show)}")"
         if [ -n "$mode" ] && uses_codex "$file"; then need_codex; fi
         # shellcheck disable=SC2086
         start_daemon rehearse "$file" $mode --socket "$SOCKET" --journal "$STATE/rehearsal.sqlite"
         lumen-studio --rehearsal "$SOCKET"
         ;;
-    yayin | live)
-        file="$(pack_path "${1:-$DEFAULT_PACK}")"
+    live)
+        file="$(show_path "${1:-$(default_show)}")"
         if uses_codex "$file"; then need_codex; fi
         start_daemon serve "$SOCKET" "$STATE/journal.sqlite" "$file"
         lumen-studio --stage "$SOCKET" &
@@ -96,16 +103,19 @@ case "$command" in
         lumen-studio "$SOCKET"
         kill "$FRAME" 2>/dev/null || true
         ;;
-    studio)
-        exec lumen-studio "$SOCKET"
-        ;;
-    paketler | packs)
+    shows)
         for f in "$PACKS"/personas/*.toml; do
             [ -f "$f" ] || continue
             printf '%-24s %s\n' "$(basename "$f" .toml)" "$(lumend validate-pack "$f" 2>&1)"
         done
         ;;
-    uret | generate)
+    status)
+        exec lumend control "$SOCKET" status
+        ;;
+    update | info)
+        exec lumen-live "$command" "$@"
+        ;;
+    generate)
         need_codex
         what="${1:-}"
         [ $# -gt 0 ] && shift
@@ -113,18 +123,15 @@ case "$command" in
             persona) exec lumend generate-pack "$PACKS/briefs" "$PACKS/personas" "$@" ;;
             skill) exec lumend generate-skills "$PACKS/personas" "$@" ;;
             avatar) exec lumend generate-avatars "$PACKS/avatars" "$@" ;;
-            inceleme | review) exec lumend review-personas "$PACKS/personas" "$@" ;;
-            iyilestir | refine) exec lumend refine-personas "$PACKS/personas" "$@" ;;
-            *) fail "usage: lumen uret persona|skill|avatar|inceleme|iyilestir [--force]" ;;
+            review) exec lumend review-personas "$PACKS/personas" "$@" ;;
+            refine) exec lumend refine-personas "$PACKS/personas" "$@" ;;
+            *) fail "usage: lumen generate persona|skill|avatar|review|refine [--force]" ;;
         esac
         ;;
-    durum | status)
-        exec lumend control "$SOCKET" status
-        ;;
-    -h | --help | yardim)
+    -h | --help | help)
         sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
         ;;
     *)
-        fail "unknown command '$command' (lumen yardim)"
+        fail "unknown command '$command' (lumen help)"
         ;;
 esac

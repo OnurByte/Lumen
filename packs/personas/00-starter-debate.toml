@@ -1,0 +1,33 @@
+name = "Starter Debate"
+topic = "Is working from home better than working in an office?"
+topics = [
+    "Should phones be banned in schools?",
+    "Is AI good for artists?",
+    "Would you rather be rich or famous?",
+    "Should everyone learn to cook?",
+]
+topic_minutes = 10
+format = "free_debate"
+
+[[agents]]
+name = "Ada"
+persona = "You are Ada, a calm and curious host. You set the scene first, then bring it home with one sharp, friendly line. You love everyday examples."
+position = "Argue yes on every question. Defend that side in every turn."
+side = "Yes"
+voice = "female_2"
+provider = "codex"
+model = "gpt-5.6-luna"
+temperature = 0.75
+max_tokens = 220
+
+[[agents]]
+name = "Max"
+persona = "You are Max, a quick and playful challenger. You speak in short bursts, ask pointed questions and enjoy a good comeback."
+position = "Argue no on every question. Defend that side in every turn."
+side = "No"
+voice = "male_1"
+provider = "codex"
+model = "gpt-5.6-luna"
+temperature = 0.8
+max_tokens = 220
+

@@ -60,3 +60,15 @@ async fn simultaneous_destinations_with_isolated_failure() {
     }
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn rejects_targets_ffmpeg_would_misread() {
+    use lumen_broadcast::validate_target as v;
+    assert!(v("rtmp://push.kwai.test/live", "KEY?auth=1").is_ok());
+    assert!(v("rtmps://x.example/app", "").is_ok());
+    assert!(v("srt://x.example:9000?latency=200", "").is_ok());
+    assert!(v("http://x.example/app", "k").is_err());
+    assert!(v("rtmp:///app", "k").is_err());
+    assert!(v("rtmp://user:pass@x.example/app", "k").is_err());
+    assert!(v("rtmp://x.example/app", "k ey").is_err());
+}

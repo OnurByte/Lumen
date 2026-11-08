@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Lumen</title>
@@ -54,11 +54,11 @@
   <div class="ground" id="ground"><img class="bg" id="bg0" alt=""><img class="bg" id="bg1" alt=""><div id="veil"></div></div>
   <div id="content">
     <div class="card" id="topic-card">
-      <div id="topic-head"><b id="brand">HAKİKAT ARAYIŞI</b><span><span id="phase"></span><span id="next"></span></span></div>
-      <div id="topic">Birazdan başlıyoruz</div>
+      <div id="topic-head"><b id="brand"></b><span><span id="phase"></span><span id="next"></span></span></div>
+      <div id="topic">Starting soon</div>
     </div>
     <div id="hosts"></div>
-    <div id="question"><div class="label">İZLEYİCİ SORUYOR</div><div class="text"></div></div>
+    <div id="question"><div class="label">A VIEWER ASKS</div><div class="text"></div></div>
     <div class="card" id="caption"><div class="who"></div><div class="text"></div></div>
   </div>
 </div>
@@ -126,11 +126,11 @@ function render() {
   const { stage, avatars, theme } = state, t = theme || {};
   const now = (performance.now() - started) / 1000;
   carousel(t, state.backgrounds || 0);
-  $("brand").textContent = (stage.show || "Hakikat Arayışı").toLocaleUpperCase("tr");
-  $("topic").textContent = stage.finished ? "Bu akşamlık bu kadar. İzlediğiniz için teşekkürler."
-    : (stage.topic || "Birazdan başlıyoruz");
+  $("brand").textContent = (stage.show || "").toUpperCase();
+  $("topic").textContent = stage.finished ? "That's all for tonight. Thanks for watching."
+    : (stage.topic || "Starting soon");
   $("phase").textContent = stage.phase || "";
-  $("next").textContent = stage.topic_total > 0 ? `SORU ${stage.topic_number} / ${stage.topic_total}` : "";
+  $("next").textContent = stage.topic_total > 0 ? `QUESTION ${stage.topic_number} / ${stage.topic_total}` : "";
   const key = stage.agents.join("|") + stage.avatars.join("|") + avatars.join("|");
   if (key !== render.key) { render.key = key; buildHosts(stage, avatars); }
   const sideColor = (i) => (i === 0 ? t.side_a : t.side_b) || "#ffffff";
@@ -155,8 +155,8 @@ function render() {
     side.textContent = stage.sides[i] || ""; side.style.background = color; side.style.color = on(color);
     const status = el.querySelector(".status");
     status.className = "status" + (thinking ? " thinking" : "");
-    if (speaking) { status.style.color = color; status.innerHTML = '<span class="dot"></span>KONUŞUYOR'; status.querySelector(".dot").style.background = color; }
-    else if (thinking) { status.textContent = "düşünüyor" + ".".repeat(1 + Math.floor(now * 2.5) % 3); }
+    if (speaking) { status.style.color = color; status.innerHTML = '<span class="dot"></span>SPEAKING'; status.querySelector(".dot").style.background = color; }
+    else if (thinking) { status.textContent = "thinking" + ".".repeat(1 + Math.floor(now * 2.5) % 3); }
     else status.textContent = "";
   });
   const q = $("question");

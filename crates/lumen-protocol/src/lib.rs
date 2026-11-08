@@ -158,10 +158,10 @@ pub struct StageState {
     /// Host preparing the next turn (shown as "thinking" until speech starts).
     #[serde(default)]
     pub thinking: Option<String>,
-    /// Debate stage label (e.g. "ÇAPRAZ SORGU"), empty when not applicable.
+    /// Debate stage label (e.g. "CROSS-EXAMINATION"), empty when not applicable.
     #[serde(default)]
     pub phase: String,
-    /// Show (concept) name, e.g. "Hakikat Arayışı".
+    /// Show (concept) name, as the operator named it.
     #[serde(default)]
     pub show: String,
     /// Broadcast session clock for the operator (never drawn on air).

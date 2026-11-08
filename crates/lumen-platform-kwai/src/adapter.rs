@@ -3,7 +3,7 @@ use crate::session::KwaiSession;
 use async_trait::async_trait;
 use lumen_live::adapter::AuthState;
 use lumen_live::event::stable_hash;
-use lumen_live::{AdapterError, BroadcastEndpoint, Capabilities, Credentials, LiveSession, LiveTarget, Platform, PlatformAdapter, Profile, Support};
+use lumen_live::{AdapterError, BroadcastEndpoint, Capabilities, Credentials, LiveSession, LiveTarget, LoginSpec, Platform, PlatformAdapter, Profile, SecretString, SessionCapture, Support};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -61,6 +61,21 @@ impl PlatformAdapter for KwaiAdapter {
         let caption = target.settings.get("studio_caption").map_or("", String::as_str);
         studio(target, credentials)?.create_room(caption, bytes, kind).await
     }
+    fn login_spec(&self, target: &LiveTarget) -> Option<LoginSpec> {
+        let origin = crate::studio::origin(target.settings.get("studio_host").map_or(crate::studio::DEFAULT_HOST, String::as_str));
+        Some(LoginSpec { url: format!("{origin}/user/login?redirect=%2Flive%2Flist"), credential: "studio_cookie", capture: SessionCapture::Cookies(format!("{origin}/rest/")) })
+    }
+    async fn session_valid(&self, target: &LiveTarget, session: &SecretString) -> bool {
+        let host = target.settings.get("studio_host").map_or(crate::studio::DEFAULT_HOST, String::as_str);
+        match crate::studio::StudioClient::new(host, session, target.settings.get("proxy").map(String::as_str)) {
+            Ok(client) => client.logged_in().await,
+            Err(_) => false,
+        }
+    }
+    async fn check_broadcast(&self, target: &LiveTarget, credentials: &Credentials) -> Result<String, AdapterError> {
+        cover(target)?;
+        studio(target, credentials)?.preflight().await
+    }
     async fn start_broadcast(&self, target: &LiveTarget, credentials: &Credentials, endpoint: &BroadcastEndpoint) -> Result<(), AdapterError> {
         studio(target, credentials)?.start_live(room_id(endpoint)?).await
     }
@@ -83,9 +98,12 @@ fn studio(target: &LiveTarget, credentials: &Credentials) -> Result<crate::studi
 
 fn cover(target: &LiveTarget) -> Result<(Vec<u8>, &'static str), AdapterError> {
     let path = target.settings.get("studio_cover").ok_or_else(|| AdapterError::Unsupported("set `studio_cover` to a jpg/png cover image (Kwai requires one)".into()))?;
-    let lower = path.to_ascii_lowercase();
-    let kind = if lower.ends_with(".png") { "image/png" } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") { "image/jpeg" } else { return Err(AdapterError::Unsupported("studio_cover must be .jpg or .png".into())) };
     let bytes = std::fs::read(path).map_err(|e| AdapterError::Unsupported(format!("cannot read studio_cover: {e}")))?;
+    let kind = match bytes.as_slice() {
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [0x89, b'P', b'N', b'G', ..] => "image/png",
+        _ => return Err(AdapterError::Unsupported("studio_cover must be a JPEG or PNG image".into())),
+    };
     if bytes.len() > 2 * 1024 * 1024 {
         return Err(AdapterError::Unsupported("studio_cover must be at most 2 MB".into()));
     }

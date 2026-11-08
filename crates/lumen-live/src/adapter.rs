@@ -1,4 +1,5 @@
 //! The contract every platform connector implements.
+use crate::secret::SecretString;
 use crate::event::LiveEvent;
 use crate::platform::{AccountId, Capabilities, Platform};
 use crate::secret::Credentials;
@@ -104,6 +105,23 @@ pub struct BroadcastEndpoint {
 }
 
 /// An open LIVE connection. Dropping it must close the underlying socket.
+/// How to read an account's session out of a browser after a manual login.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionCapture {
+    /// Cookies sent to this URL, joined as one `Cookie` header.
+    Cookies(String),
+    /// A page script returning the session as a string, or `""` before login.
+    Script(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginSpec {
+    pub url: String,
+    /// Credential name the session is stored under.
+    pub credential: &'static str,
+    pub capture: SessionCapture,
+}
+
 #[async_trait]
 pub trait LiveSession: Send {
     fn room_id(&self) -> &str;
@@ -129,6 +147,18 @@ pub trait PlatformAdapter: Send + Sync + 'static {
     /// and returns its push URL). Platforms where the operator copies the key by hand return
     /// `Unsupported`; their stored `ingest_url` + `stream_key` are used instead.
     async fn provision_broadcast(&self, _target: &LiveTarget, _credentials: &Credentials) -> Result<BroadcastEndpoint, AdapterError> {
+        Err(AdapterError::Unsupported(format!("{}: copy the server URL and stream key from the platform's own tools", self.platform())))
+    }
+    /// Where a user logs in by hand and how to read the resulting session (`accounts login`).
+    fn login_spec(&self, _target: &LiveTarget) -> Option<LoginSpec> {
+        None
+    }
+    /// Whether a captured session is really logged in.
+    async fn session_valid(&self, _target: &LiveTarget, session: &SecretString) -> bool {
+        !session.is_empty()
+    }
+    /// Report whether `provision_broadcast` would succeed, without creating anything.
+    async fn check_broadcast(&self, _target: &LiveTarget, _credentials: &Credentials) -> Result<String, AdapterError> {
         Err(AdapterError::Unsupported(format!("{}: copy the server URL and stream key from the platform's own tools", self.platform())))
     }
     /// Tell the platform the stream is flowing and the LIVE should start (no-op where pushing

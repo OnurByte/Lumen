@@ -11,7 +11,7 @@ pub enum Format {
     Munazara,
 }
 
-/// Münazara stage within a topic, derived from the topic's elapsed share of its time slot.
+/// Debate stage within a topic, derived from the topic's elapsed share of its time slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Opening,
@@ -32,10 +32,10 @@ impl Phase {
     /// On-screen label for viewers.
     pub fn label(self) -> &'static str {
         match self {
-            Phase::Opening => "AÇILIŞ",
-            Phase::Rebuttal => "ÇÜRÜTME",
-            Phase::Cross => "ÇAPRAZ SORGU",
-            Phase::Closing => "KAPANIŞ",
+            Phase::Opening => "OPENING",
+            Phase::Rebuttal => "REBUTTAL",
+            Phase::Cross => "CROSS-EXAMINATION",
+            Phase::Closing => "CLOSING",
         }
     }
     /// Turn instruction for the speaking model.
@@ -74,16 +74,16 @@ impl Cue {
     pub fn instruction(self) -> &'static str {
         match self {
             Cue::ShowOpening => {
-                "Yayını sen açıyorsun: izleyicileri sıcak bir \"Merhaba arkadaşlar\" ile selamla, programı ve ilk soruyu tek cümleyle sun, karşındaki konuşmacıyı adıyla tanıt, sonra ilk tavrını koy."
+                "You are opening the broadcast: greet viewers warmly, present the show and the first question in one sentence, name the person opposite you, then state your position."
             }
             Cue::Introduce => {
-                "Bu senin ilk sözün: izleyicileri selamla, kendini adınla ve hangi tarafta durduğunla kısaca tanıt, sonra rakibine ilk cevabını ver."
+                "These are your first words: greet viewers, briefly introduce yourself by name and say which side you are on, then give your opponent your first answer."
             }
             Cue::TopicIntro => {
-                "Yeni soruya geçiyoruz: soruyu izleyicilere sen sun, neden önemli olduğunu bir cümleyle söyle, sonra tavrını koy."
+                "We are moving to a new question: present it to viewers, say in one sentence why it matters, then take your stance."
             }
             Cue::ChatCheckIn => {
-                "Kısa bir an sohbete dön: izleyicilere seslen, yorumlara yazmalarını ve taraf tutmalarını iste, ardından tartışmaya bağla."
+                "Turn to the chat for a moment: speak to viewers, ask them to comment and pick a side, then tie it back to the debate."
             }
         }
     }
@@ -106,7 +106,7 @@ pub struct TurnBrief {
     pub new_topic: bool,
     /// Milliseconds left before the rotation moves on (0 when rotation is off).
     pub topic_remaining_ms: u64,
-    /// Münazara stage, when the format and a topic timer are active.
+    /// Debate stage, when the format and a topic timer are active.
     pub phase: Option<Phase>,
     /// Live-show moment to cover this turn.
     pub cue: Option<Cue>,
@@ -195,7 +195,7 @@ impl Director {
         let mut comment = audience.next(now_ms);
         if comment
             .as_ref()
-            .is_some_and(|comment| comment.text.trim() == "!çapraz")
+            .is_some_and(|comment| matches!(comment.text.trim(), "!cross" | "!çapraz"))
         {
             if self
                 .last_crossfire

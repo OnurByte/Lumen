@@ -1,4 +1,4 @@
-//! Studio design system, following the onur.af design language: monochrome tokens (black
+//! Studio design system; `brand.md` at the repository root is the reference. Monochrome tokens (black
 //! ground, white text, #b3b3b3 muted, #404040 borders, #222 surfaces), Helvetica-style type,
 //! 12 px cards, 8 px controls at least 44 px tall, filled primary action, 4 px spacing grid.
 //!
@@ -7,8 +7,8 @@
 //! one accent per element. Components here are the only place colors are chosen.
 use gpui::{prelude::*, *};
 
-pub const FONT: &str = "Nimbus Sans";
-pub const MONO: &str = "JetBrainsMono Nerd Font";
+pub const FONT: &str = if cfg!(target_os = "macos") { "Helvetica Neue" } else { "Nimbus Sans" };
+pub const MONO: &str = if cfg!(target_os = "macos") { "Menlo" } else { "JetBrainsMono Nerd Font" };
 
 pub mod color {
     use gpui::{Rgba, rgb};
@@ -28,8 +28,9 @@ pub mod color {
     pub fn border() -> Rgba {
         rgb(0x404040)
     }
+    /// Edge of operable controls; `border` is too faint for them (3:1 non-text contrast).
     pub fn input() -> Rgba {
-        rgb(0x404040)
+        rgb(0x8c8c8c)
     }
     pub fn foreground() -> Rgba {
         rgb(0xfafafa)
@@ -38,7 +39,7 @@ pub mod color {
         rgb(0xb3b3b3)
     }
     pub fn subtle_foreground() -> Rgba {
-        rgb(0x808080)
+        rgb(0x8c8c8c)
     }
     // Semantic.
     pub fn success() -> Rgba {
@@ -101,7 +102,7 @@ pub fn card(title: &str, description: Option<&str>) -> Div {
         )
         .children(description.map(|d| {
             div()
-                .text_xs()
+                .text_sm()
                 .text_color(color::muted_foreground())
                 .child(d.to_owned())
         }));
@@ -118,24 +119,131 @@ pub fn card(title: &str, description: Option<&str>) -> Div {
         .child(header)
 }
 
-/// Pill with a status dot, e.g. "● Connected".
+/// Status tag: an adjective in sentence case, never clickable. Colour is never the only signal.
 pub fn badge(label: impl Into<SharedString>, tone: Tone) -> Div {
     let c = tone.color();
     div()
-        .flex()
-        .items_center()
-        .gap_1p5()
-        .px_2p5()
+        .flex_none()
+        .px_2()
         .py_0p5()
-        .rounded_full()
-        .bg(tint(c, 0.12))
-        .border_1()
-        .border_color(tint(c, 0.28))
+        .rounded(px(4.))
+        .bg(tint(c, 0.14))
         .text_xs()
         .font_weight(FontWeight::MEDIUM)
         .text_color(c)
-        .child(div().size_1p5().rounded_full().bg(c))
         .child(label.into())
+}
+
+/// Visible keyboard focus and Tab order for anything operable.
+pub fn focusable(element: Stateful<Div>) -> Stateful<Div> {
+    element.tab_stop(true).focus(|s| s.border_2().border_color(color::foreground()))
+}
+
+/// The one filled action on a page.
+pub fn primary(id: impl Into<ElementId>, text: impl Into<SharedString>, enabled: bool) -> Stateful<Div> {
+    focusable(
+        div()
+            .id(id)
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .h_11()
+            .px_5()
+            .rounded_lg()
+            .border_1()
+            .border_color(color::foreground())
+            .bg(color::foreground())
+            .text_color(color::background())
+            .text_sm()
+            .font_weight(FontWeight::MEDIUM)
+            .when(enabled, |d| d.cursor_pointer().hover(|s| s.bg(rgb(0xd9d9d9))))
+            .when(!enabled, |d| d.opacity(0.45))
+            .child(text.into()),
+    )
+}
+
+/// Quiet underlined action, 44 px tall so it is easy to hit.
+pub fn action(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Stateful<Div> {
+    focusable(
+        div()
+            .id(id)
+            .flex()
+            .flex_none()
+            .items_center()
+            .h_11()
+            .px_2()
+            .rounded_lg()
+            .border_1()
+            .border_color(rgba(0))
+            .text_sm()
+            .underline()
+            .text_color(color::foreground())
+            .cursor_pointer()
+            .hover(|s| s.bg(color::muted()))
+            .child(text.into()),
+    )
+}
+
+/// Page title and one line saying what the page is for.
+pub fn page_header(title: &str, lead: &str) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(div().text_xl().font_weight(FontWeight::MEDIUM).text_color(color::foreground()).child(title.to_owned()))
+        .child(div().text_sm().text_color(color::muted_foreground()).child(lead.to_owned()))
+}
+
+/// What went wrong and how to fix it, at the top of the page.
+pub fn error_summary(message: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_4()
+        .rounded_lg()
+        .border_2()
+        .border_color(color::danger())
+        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(color::foreground()).child("There is a problem"))
+        .child(div().text_sm().text_color(color::danger()).child(message.into()))
+}
+
+/// One thing's facts: heading, optional detail and status tag, then `summary_row`s.
+pub fn summary_card(title: impl Into<SharedString>, detail: impl Into<SharedString>, status: Option<Div>) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .p_5()
+        .rounded_xl()
+        .bg(color::card())
+        .border_1()
+        .border_color(color::border())
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .pb_3()
+                .child(div().font_weight(FontWeight::MEDIUM).text_color(color::foreground()).child(title.into()))
+                .child(div().text_sm().text_color(color::muted_foreground()).child(detail.into()))
+                .child(div().flex_1())
+                .children(status),
+        )
+}
+
+/// Key, value and at most one action that changes that value.
+pub fn summary_row(key: &str, value: impl IntoElement, action: Option<AnyElement>) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_4()
+        .min_h_11()
+        .border_t_1()
+        .border_color(color::border())
+        .child(div().w(px(150.)).flex_none().text_sm().text_color(color::muted_foreground()).child(key.to_owned()))
+        .child(div().flex_1().min_w_0().overflow_hidden().text_sm().text_color(color::foreground()).child(value))
+        .children(action)
 }
 
 /// Keyboard shortcut chip.
@@ -257,9 +365,8 @@ pub fn button(
     } else {
         kbd(keys)
     };
-    div()
+    focusable(div()
         .id(id)
-        .tab_stop(true)
         .flex()
         .items_center()
         .justify_between()
@@ -276,14 +383,14 @@ pub fn button(
         .cursor_pointer()
         .when(!enabled, |b| b.opacity(0.45))
         .hover(move |s| s.bg(hover))
-        .focus(|s| s.border_color(color::foreground()))
         .child(text.to_owned())
-        .child(chip)
+        .child(chip))
 }
 
-/// The Lumen mark (light version for the dark UI), from `packs/brand`.
+/// The Lumen mark, compiled in so it appears even before any data is installed.
 pub fn mark(size: f32) -> Img {
-    img(crate::theme::lumen_path("brand/lumen-mark-light.png"))
-        .size(px(size))
-        .flex_none()
+    static MARK: std::sync::LazyLock<std::sync::Arc<Image>> = std::sync::LazyLock::new(|| {
+        std::sync::Arc::new(Image::from_bytes(ImageFormat::Png, include_bytes!("../../../packs/brand/lumen-mark-light.png").to_vec()))
+    });
+    img(MARK.clone()).size(px(size)).flex_none()
 }

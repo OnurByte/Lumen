@@ -189,6 +189,12 @@ impl PlatformAdapter for TikTokAdapter {
             ..Capabilities::NONE
         }
     }
+    fn login_spec(&self, _target: &LiveTarget) -> Option<lumen_live::LoginSpec> {
+        Some(lumen_live::LoginSpec { url: "https://www.tiktok.com/login".into(), credential: "cookie", capture: lumen_live::SessionCapture::Cookies("https://www.tiktok.com/".into()) })
+    }
+    async fn session_valid(&self, _target: &LiveTarget, session: &lumen_live::SecretString) -> bool {
+        session.expose().split("; ").any(|c| c.starts_with("sessionid=") && c.len() > "sessionid=".len())
+    }
     async fn authenticate(&self, credentials: &Credentials) -> Result<AuthState, AdapterError> {
         match credentials.get("cookie") {
             None => Ok(AuthState::Anonymous),

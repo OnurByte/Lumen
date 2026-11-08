@@ -117,14 +117,14 @@ const VIEWERS: [&str; 18] = [
     "zeynep.k",
     "mert_34",
     "elifsu",
-    "barış.dev",
-    "ayşe_tr",
+    "maya.dev",
+    "sam_uk",
     "kaan.06",
     "derya",
     "onur_k",
     "selin.mp3",
     "emre1903",
-    "nazlı",
+    "nora",
     "tolga_x",
     "ipek.art",
     "burak35",
@@ -306,7 +306,7 @@ impl Room {
             frames: Default::default(),
             started: Instant::now(),
         };
-        room.system("Not connected to TikTok. Comments are local and simulated.");
+        room.system("Not connected to a platform. Comments are local and simulated.");
         room.link.send(Command::Status);
         room
     }
@@ -433,16 +433,15 @@ impl Room {
         let a = agents[(self.rand() & 1) as usize].clone();
         let templates = [
             "@{a} buna ne diyorsun?",
-            "@{a} bir örnek verir misin?",
-            "{a} haklı bence",
-            "{a} bu sefer zorlandı 😄",
-            "Peki bunu nereden biliyoruz?",
-            "Konu çok güzel, devam!",
-            "İkisi de biraz haklı aslında",
-            "@{a} ya tam tersi olsaydı?",
-            "Bir dakika, bu çelişki değil mi?",
-            "Biraz daha yavaş anlatır mısınız?",
-            "Annem de aynısını söylüyor 😂",
+            "@{a} can you give an example?",
+            "{a} has a point",
+            "{a} is struggling this time 😄",
+            "Great topic, keep going!",
+            "They're both a little right",
+            "@{a} what if it was the other way round?",
+            "Hold on, isn't that a contradiction?",
+            "Can you slow down a bit?",
+            "My mum says the same thing 😂",
         ];
         templates[(self.rand() % templates.len() as u64) as usize].replace("{a}", &a)
     }
@@ -582,7 +581,7 @@ impl Room {
                             div()
                                 .text_size(u(15.))
                                 .text_color(theme::color(&theme.muted))
-                                .child(format!("düşünüyor{dots}")),
+                                .child(format!("thinking{dots}")),
                         )
                     })
                     .when(speaking, |d| {
@@ -595,7 +594,7 @@ impl Room {
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(accent)
                                 .child(div().size(u(10.)).rounded_full().bg(accent))
-                                .child("KONUŞUYOR"),
+                                .child("SPEAKING"),
                         )
                     }),
             )
@@ -653,20 +652,16 @@ impl Room {
             .unwrap_or_default();
         let has_show = !stage.agents[0].is_empty();
         let topic = if stage.finished {
-            "Bu akşamlık bu kadar. İzlediğiniz için teşekkürler.".to_owned()
+            "That's all for tonight. Thanks for watching.".to_owned()
         } else if stage.topic.is_empty() {
-            "Birazdan başlıyoruz".to_owned()
+            "Starting soon".to_owned()
         } else {
             stage.topic.clone()
         };
         // On air: concept name and "SORU n / N" only; timers live in the operator panel.
         let next = (stage.topic_total > 0)
-            .then(|| format!("SORU {} / {}", stage.topic_number, stage.topic_total));
-        let brand = if stage.show.is_empty() {
-            "HAKİKAT ARAYIŞI".to_owned()
-        } else {
-            stage.show.to_uppercase()
-        };
+            .then(|| format!("QUESTION {} / {}", stage.topic_number, stage.topic_total));
+        let brand = stage.show.to_uppercase();
         let speaker_index = stage
             .speaker
             .as_ref()
@@ -725,7 +720,7 @@ impl Room {
                     div()
                         .text_size(u(13.))
                         .font_weight(FontWeight::BOLD)
-                        .child("İZLEYİCİ SORUYOR"),
+                        .child("A VIEWER ASKS"),
                 )
                 .child(
                     div()
@@ -884,7 +879,7 @@ impl Room {
         let bots = self.bots;
         let audience = ui::card(
             "Audience rehearsal",
-            Some("Not connected to TikTok. Comments enter the real question queue."),
+            Some("Not connected to a platform. Comments enter the real question queue."),
         )
         .child(
             div()
@@ -935,6 +930,8 @@ impl Room {
                     )
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .text_color(if item.kind == Kind::System {
                                 color::muted_foreground()
                             } else {
@@ -966,6 +963,8 @@ impl Room {
                         div()
                             .flex()
                             .flex_col()
+                            .flex_1()
+                            .min_w_0()
                             .child(
                                 div()
                                     .text_base()

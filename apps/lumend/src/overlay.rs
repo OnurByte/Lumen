@@ -129,20 +129,13 @@ fn config_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
 }
 
-/// The user's theme as JSON; without a theme file, the shipped oriental carousel default.
+/// The user's theme as JSON; without a theme file, a plain background.
 fn theme() -> serde_json::Value {
     config_dir()
         .and_then(|d| std::fs::read_to_string(d.join("lumen/theme.toml")).ok())
         .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
         .and_then(|value| serde_json::to_value(value).ok())
-        .unwrap_or_else(|| {
-            serde_json::json!({
-                "background": "carousel",
-                "images": (1..=4).map(|i| format!("lumen:backgrounds/oryantal-{i}.png")).collect::<Vec<_>>(),
-                "carousel_seconds": 20,
-                "image_dim": 0.6,
-            })
-        })
+        .unwrap_or_else(|| serde_json::json!({ "background": "solid" }))
 }
 
 /// `lumen:rel` -> installed `packs/rel` if present, else the source checkout's.

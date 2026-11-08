@@ -3,7 +3,7 @@
 //! Defaults follow the onur.af design language: monochrome (black ground, white text,
 //! #b3b3b3 muted, #404040 borders, #222 surfaces), Helvetica-style type with normal-weight
 //! headings, 12 px cards and 8 px controls, no decorative accents, glows or gradients.
-//! Everything here can be changed from the Görünüm page or by editing the file.
+//! Everything here can be changed from the Appearance page or by editing the file.
 use gpui::{Global, Rgba, rgb};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -48,12 +48,10 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            // "Hakikat Arayışı": oriental backdrops (carpet, İznik tiles, kilim, lattice) rotate
-            // behind a monochrome, portfolio-style frame.
-            background: Background::Carousel,
+            background: Background::Solid,
             ground: "#000000".into(),
             gradient_to: "#222222".into(),
-            images: DEFAULT_BACKGROUNDS.map(String::from).to_vec(),
+            images: Vec::new(),
             carousel_seconds: 20,
             image_dim: 0.6,
             text: "#ffffff".into(),
@@ -91,13 +89,6 @@ pub fn path() -> Option<PathBuf> {
         .map(|dir| dir.join("lumen/theme.toml"))
 }
 
-/// Shipped default backdrops, resolved through `lumen:` paths.
-pub const DEFAULT_BACKGROUNDS: [&str; 4] = [
-    "lumen:backgrounds/oryantal-1.png",
-    "lumen:backgrounds/oryantal-2.png",
-    "lumen:backgrounds/oryantal-3.png",
-    "lumen:backgrounds/oryantal-4.png",
-];
 
 /// `lumen:rel` -> installed `packs/rel` if present, else the source checkout's `packs/rel`.
 pub fn lumen_path(rel: &str) -> PathBuf {

@@ -29,15 +29,20 @@ async fn fake_studio(log: Arc<Mutex<Vec<String>>>) -> String {
                     log.lock().unwrap().push(format!("{path} | {}", if body.contains("name=\"streamType\"") { "multipart" } else { body.as_str() }));
                     let reply = if !authed {
                         r#"{"result":109,"error_msg":"login"}"#.to_string()
-                    } else if path.contains("checkPermission") || path.contains("startLive") || path.contains("stopLive") {
+                    } else if path.contains("checkPermission") {
+                        r#"{"result":1,"hasPermission":true,"userInfo":{"ksId":777,"kpn":4,"country":"BR"}}"#.into()
+                    } else if path.contains("livingRoom") {
+                        assert!(path.contains("authorId=777"));
+                        r#"{"result":1,"curRoomVo":{}}"#.into()
+                    } else if path.contains("startLive") || path.contains("stopLive") {
                         r#"{"result":1}"#.into()
                     } else if path.contains("transcodeResource") {
                         r#"{"result":1,"transcodeResources":[{"key":"SG","name":"Singapore"}]}"#.into()
                     } else if path.contains("createRoom") {
-                        assert!(body.contains("name=\"pushNodes\"\r\n\r\nSG") && body.contains("name=\"streamType\"\r\n\r\n2") && body.contains("name=\"cover\""));
+                        assert!(body.contains("name=\"pushNodes\"\r\n\r\nSG") && body.contains("name=\"streamType\"\r\n\r\n2") && body.contains("name=\"kpn\"\r\n\r\n4") && body.contains("name=\"cover\""));
                         r#"{"result":1,"createRoomResultVo":{"liveRoomId":"R42","autoStartTime":0}}"#.into()
                     } else if path.contains("cloudLive/room") {
-                        r#"{"result":1,"data":{"liveRoomId":"R42","pushUrl":["rtmp://push.kwai.test/live/KEY-42"]}}"#.into()
+                        r#"{"result":1,"data":{"liveRoomId":"R42","roomStatus":0,"pushUrl":["rtmp://push.kwai.test/live/KEY-42"]}}"#.into()
                     } else {
                         r#"{"result":500}"#.into()
                     };
@@ -62,14 +67,22 @@ async fn provisions_starts_and_stops_a_studio_room() {
     target.settings.insert("studio_cover".into(), cover.display().to_string());
     let creds = Credentials::new().with("studio_cookie", "kpn=KWAI; userId=1; session=SECRET");
 
+    let report = KwaiAdapter.check_broadcast(&target, &creds).await.unwrap();
+    assert!(report.contains("kpn 4") && report.contains("new room"), "{report}");
+    log.lock().unwrap().clear();
+
     let ep = KwaiAdapter.provision_broadcast(&target, &creds).await.unwrap();
     assert_eq!((ep.ingest_url.as_str(), ep.stream_key.expose(), ep.room_id.as_deref()), ("rtmp://push.kwai.test/live", "KEY-42", Some("R42")));
     KwaiAdapter.start_broadcast(&target, &creds, &ep).await.unwrap();
     KwaiAdapter.stop_broadcast(&target, &creds, &ep).await.unwrap();
     let calls = log.lock().unwrap().clone();
     let paths: Vec<_> = calls.iter().map(|c| c.split('?').next().unwrap().rsplit('/').next().unwrap().split(' ').next().unwrap().to_owned()).collect();
-    assert_eq!(paths, ["checkPermission", "transcodeResource", "createRoom", "room", "startLive", "stopLive"]);
-    assert!(calls[4].contains(r#""liveRoomId":"R42""#) && calls[4].contains(r#""noStreamCheckTime":2"#));
+    assert_eq!(paths, ["checkPermission", "livingRoom", "transcodeResource", "createRoom", "room", "room", "checkPermission", "startLive", "stopLive"]);
+    assert!(calls[7].contains(r#""liveRoomId":"R42""#) && calls[7].contains(r#""noStreamCheckTime":2"#) && calls[7].contains(r#""kpn":4"#));
+
+    // Pasting the whole header line works too.
+    let prefixed = Credentials::new().with("studio_cookie", "Cookie: kpn=KWAI; userId=1; session=SECRET");
+    KwaiAdapter.check_broadcast(&target, &prefixed).await.unwrap();
 
     let expired = Credentials::new().with("studio_cookie", "session=OLD");
     assert!(matches!(KwaiAdapter.provision_broadcast(&target, &expired).await, Err(lumen_live::AdapterError::Auth(_))));

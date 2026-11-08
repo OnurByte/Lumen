@@ -12,7 +12,7 @@ pub struct ModelRequest {
     pub position: String,
     /// Optional character skill sheet (Markdown) that deepens the persona's style.
     pub skill: Option<String>,
-    /// Turn-level format instruction (e.g. münazara stage).
+    /// Turn-level format instruction (e.g. debate stage).
     pub phase: Option<String>,
     pub topic: String,
     pub audible_context: Vec<String>,

@@ -1,4 +1,5 @@
 //! Operator control room; the daemon owns the show lifetime.
+mod product;
 mod accounts;
 mod app;
 mod avatar;
@@ -403,7 +404,7 @@ impl Studio {
         }
         ui::card(
             "Questions",
-            Some("Done ones are ticked, the live one is highlighted. Edit them on Questions (Ctrl 2)."),
+            Some("Done ones are ticked, the live one is highlighted. Edit them on Questions."),
         )
         .child(if questions.is_empty() {
             div()
@@ -586,7 +587,7 @@ impl Render for Studio {
                     .text_xs()
                     .text_color(color::subtle_foreground())
                     .child(format!("Socket  {}", self.link.socket.display()))
-                    .child("Tab and Enter operate controls ⁜ Ctrl 1-5 switch pages"),
+                    .child("Tab and Enter operate controls ⁜ Ctrl K finds anything"),
             )
     }
 }
@@ -634,6 +635,7 @@ fn main() {
         gpui_component::init(cx);
         kit_theme(cx);
         cx.set_global(theme::Theme::load());
+        cx.bind_keys([KeyBinding::new("secondary-k", app::ToggleFinder, None)]);
         if let Some(layout) = only {
             // Stand-alone windows for capture (`--stage`) or an existing runtime.
             rehearsal::open(socket, layout, cx);
@@ -649,7 +651,7 @@ fn main() {
                         title: Some("Lumen".into()),
                         ..Default::default()
                     }),
-                    app_id: Some("lumen".into()),
+                    app_id: Some("org.lumen.Lumen".into()),
                     window_min_size: Some(size(px(1000.), px(640.))),
                     ..Default::default()
                 },

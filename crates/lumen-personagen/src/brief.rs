@@ -48,7 +48,7 @@ fn default_topic_minutes() -> u16 {
 }
 
 fn default_language() -> Language {
-    Language::Tr
+    Language::En
 }
 
 #[derive(Debug, Clone, Deserialize)]

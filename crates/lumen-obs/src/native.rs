@@ -44,13 +44,7 @@ impl Look {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
             .and_then(|d| std::fs::read_to_string(d.join("lumen/theme.toml")).ok())
             .and_then(|t| toml::from_str(&t).ok())
-            .unwrap_or_else(|| {
-                // No theme file yet: the shipped oriental carousel default.
-                toml::from_str(
-                    "background = \"carousel\"\ncarousel_seconds = 20\nimage_dim = 0.6\nimages = [\"lumen:backgrounds/oryantal-1.png\", \"lumen:backgrounds/oryantal-2.png\", \"lumen:backgrounds/oryantal-3.png\", \"lumen:backgrounds/oryantal-4.png\"]",
-                )
-                .unwrap_or(toml::Value::Table(Default::default()))
-            });
+            .unwrap_or(toml::Value::Table(Default::default()));
         let s = |key: &str, default: &str| {
             value
                 .get(key)
@@ -259,12 +253,12 @@ fn layout(look: &Look, avatars: &[String; 2]) -> Vec<Element> {
     v.push(el(
         "soru etiketi",
         "text_ft2_source_v2",
-        text_settings(look, "HAKİKAT ARAYIŞI", 33, true, &look.muted, None),
+        text_settings(look, "", 33, true, &look.muted, None),
         85.,
         170.,
     ));
     let mut meta = el(
-        "aşama",
+        "stage",
         "text_ft2_source_v2",
         text_settings(look, "", 33, true, &look.muted, None),
         995.,
@@ -277,7 +271,7 @@ fn layout(look: &Look, avatars: &[String; 2]) -> Vec<Element> {
         "text_ft2_source_v2",
         text_settings(
             look,
-            "Birazdan başlıyoruz",
+            "Starting soon",
             60,
             false,
             &look.text,
@@ -289,7 +283,7 @@ fn layout(look: &Look, avatars: &[String; 2]) -> Vec<Element> {
     for (i, cx) in CENTERS.into_iter().enumerate() {
         let left = cx - PORTRAIT / 2.;
         v.push(el(
-            &format!("çerçeve {i}"),
+            &format!("frame {i}"),
             "color_source_v3",
             color_settings(&look.border, 1., 401, 401),
             left - 8.,
@@ -383,7 +377,7 @@ fn layout(look: &Look, avatars: &[String; 2]) -> Vec<Element> {
         (
             "izleyici etiketi",
             "text_ft2_source_v2",
-            text_settings(look, "İZLEYİCİ SORUYOR", 32, true, q, None),
+            text_settings(look, "A VIEWER ASKS", 32, true, q, None),
             80.,
             QUESTION_Y + 20.,
         ),
@@ -401,21 +395,21 @@ fn layout(look: &Look, avatars: &[String; 2]) -> Vec<Element> {
     }
     for (name, kind, settings, dx, dy) in [
         (
-            "altyazı paneli",
+            "caption panel",
             "color_source_v3",
             color_settings("#000000", 0.82, 1000, 420),
             0.,
             0.,
         ),
         (
-            "konuşan",
+            "speaker",
             "text_ft2_source_v2",
             text_settings(look, "", 40, true, &look.text, None),
             45.,
             30.,
         ),
         (
-            "altyazı",
+            "caption",
             "text_ft2_source_v2",
             text_settings(look, "", 55, true, &look.text, Some(910)),
             45.,
@@ -609,9 +603,9 @@ impl Driver {
             client,
             "soru",
             if stage.finished {
-                "Bu akşamlık bu kadar. İzlediğiniz için teşekkürler.".into()
+                "That's all for tonight. Thanks for watching.".into()
             } else if stage.topic.is_empty() {
-                "Birazdan başlıyoruz".into()
+                "Starting soon".into()
             } else {
                 stage.topic.clone()
             },
@@ -619,7 +613,7 @@ impl Driver {
         )
         .await?;
         let brand = if stage.show.is_empty() {
-            "HAKİKAT ARAYIŞI".to_owned()
+            String::new()
         } else {
             stage.show.to_uppercase()
         };
@@ -631,7 +625,7 @@ impl Driver {
             .flatten()
             .collect::<Vec<_>>()
             .join("   ");
-        self.text(client, "aşama", meta, None).await?;
+        self.text(client, "stage", meta, None).await?;
         for i in 0..2 {
             let name = &stage.agents[i];
             let speaking = !name.is_empty() && stage.speaker.as_deref() == Some(name.as_str());
@@ -664,9 +658,9 @@ impl Driver {
             )
             .await?;
             let status = if speaking {
-                "● KONUŞUYOR".to_owned()
+                "● SPEAKING".to_owned()
             } else if thinking {
-                format!("düşünüyor{}", ".".repeat(1 + (t * 2.5) as usize % 3))
+                format!("thinking{}", ".".repeat(1 + (t * 2.5) as usize % 3))
             } else {
                 String::new()
             };
@@ -699,11 +693,11 @@ impl Driver {
         } else {
             CAPTION_Y_HIGH
         };
-        self.move_y(client, "altyazı paneli", 40., y).await?;
-        self.move_y(client, "konuşan", 85., y + 30.).await?;
-        self.move_y(client, "altyazı", 85., y + 85.).await?;
+        self.move_y(client, "caption panel", 40., y).await?;
+        self.move_y(client, "speaker", 85., y + 30.).await?;
+        self.move_y(client, "caption", 85., y + 85.).await?;
         let captioned = !stage.caption.is_empty();
-        for name in ["altyazı paneli", "konuşan", "altyazı"] {
+        for name in ["caption panel", "speaker", "caption"] {
             self.show(client, name, captioned).await?;
         }
         let who = stage.speaker.clone().unwrap_or_default();
@@ -712,8 +706,8 @@ impl Driver {
             .iter()
             .position(|a| *a == who)
             .map_or(self.look.text.clone(), |i| self.look.sides[i].clone());
-        self.text(client, "konuşan", who, Some(&color)).await?;
-        self.text(client, "altyazı", stage.caption.clone(), None)
+        self.text(client, "speaker", who, Some(&color)).await?;
+        self.text(client, "caption", stage.caption.clone(), None)
             .await?;
         Ok(())
     }

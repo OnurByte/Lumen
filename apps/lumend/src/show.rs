@@ -291,7 +291,7 @@ pub async fn run_loop<M: ModelProvider, V: VoiceProvider, S: Playback>(
             &mut session,
             ModelRequest {
                 persona: format!(
-                    "Senin adın {}. Karşındaki konuşmacı {}. {}",
+                    "Your name is {}. The person opposite you is {}. {}",
                     agent.name,
                     pack.agents[1 - index].name,
                     agent.persona
@@ -300,7 +300,7 @@ pub async fn run_loop<M: ModelProvider, V: VoiceProvider, S: Playback>(
                 skill: skills[index].clone(),
                 phase: {
                     let show = (brief.cue == Some(lumen_debate::director::Cue::ShowOpening))
-                        .then(|| format!("Programın adı: {}.", pack.name));
+                        .then(|| format!("The show is called {}.", pack.name));
                     let parts: Vec<String> = show
                         .into_iter()
                         .chain(brief.cue.map(|c| c.instruction().to_owned()))
