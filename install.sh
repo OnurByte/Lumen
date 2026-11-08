@@ -82,7 +82,8 @@ have ffmpeg || missing="$missing ffmpeg"
 
 source_dir=""
 here="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
-if [ -z "${LUMEN_ARCHIVE:-}" ] && [ -z "${LUMEN_REPO:-}" ] && [ -z "${LUMEN_VERSION:-}" ] &&
+# `curl | sh` has no script file, so the current folder must not count as a checkout.
+if [ -f "$0" ] && [ -z "${LUMEN_ARCHIVE:-}" ] && [ -z "${LUMEN_REPO:-}" ] && [ -z "${LUMEN_VERSION:-}" ] &&
     [ -f "$here/Cargo.toml" ] && [ -d "$here/apps/lumend" ]; then
     source_dir="$here"
     have cc || missing="$missing compiler"
