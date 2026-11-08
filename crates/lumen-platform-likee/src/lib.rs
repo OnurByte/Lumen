@@ -1,8 +1,10 @@
 //! Likee GLOBAL web API, reimplemented in Rust from lucasintel/likee (Ruby, BSD-3) and
 //! lucasintel/likee.cr (Crystal). Endpoints are unofficial and may change.
 //!
-//! LIVE chat/gift events: **unsupported**. No public or documented Likee LIVE event protocol is
-//! known, and none was validated (see docs/platforms.md). `open_live` returns `Unsupported`.
+//! LIVE events come from the public web viewer protocol (see [`live`]); search and user info
+//! endpoints follow tailsjs/likee-api-wrapper (ISC). None of this was reachable from the
+//! validation network, so every capability is `Experimental` (docs/platforms.md).
+pub mod live;
 use async_trait::async_trait;
 use lumen_live::adapter::AuthState;
 use lumen_live::{AdapterError, Capabilities, Credentials, LiveSession, LiveTarget, Platform, PlatformAdapter, Profile, Support};
@@ -175,6 +177,28 @@ impl LikeeClient {
         self.send(self.http.post(url).form(form)).await?.json().await.map_err(|e| AdapterError::Protocol(e.to_string()))
     }
 
+    /// Keyword user search (`searchApi/searchUser`). Returns the raw `data` payload.
+    pub async fn search_users(&self, keyword: &str, limit: u32, country: &str) -> Result<Value, AdapterError> {
+        let body = self.post_json(&format!("{API_BASE}/searchApi/searchUser"), json!({"keyword": keyword, "start": 0, "limit": limit.clamp(1, 50), "countryCode": country})).await?;
+        data(&body).cloned()
+    }
+    /// User info by numeric uid (`userApi/getUserInfo`).
+    pub async fn user_info(&self, uid: &str) -> Result<Value, AdapterError> {
+        let body = self.post_json(&format!("{API_BASE}/userApi/getUserInfo"), json!({"uid": uid})).await?;
+        data(&body).cloned()
+    }
+    /// Resolve a LIVE share link (`likee.video/sid/…` or a short `likee.video/s/…` link).
+    pub async fn live_room(&self, share_url: &str) -> Result<live::ShareRoom, AdapterError> {
+        if !live::valid_share_url(share_url) {
+            return Err(AdapterError::NotFound("`share_url` must be an https likee.video LIVE share link".into()));
+        }
+        let resp = self.send(self.http.get(share_url)).await?;
+        if !live::valid_share_url(resp.url().as_str()) {
+            return Err(AdapterError::Protocol("share link redirected away from likee.video".into()));
+        }
+        live::parse_share_page(&resp.text().await.map_err(|e| AdapterError::Transient(e.to_string()))?)
+    }
+
     /// Creator lookup by Likee ID (the "search" the reference libraries offer).
     pub async fn find_creator(&self, username: &str) -> Result<Profile, AdapterError> {
         let html = self.send(self.http.get(format!("{WEB_BASE}/@{}", username.trim_start_matches('@')))).await?.text().await.map_err(|e| AdapterError::Transient(e.to_string()))?;
@@ -213,7 +237,8 @@ impl PlatformAdapter for LikeeAdapter {
     }
     fn capabilities(&self) -> Capabilities {
         // Fixture-tested only: likee.video refused TLS from the validation network (docs/platforms.md).
-        Capabilities { profile: Support::Experimental, search: Support::Experimental, videos: Support::Experimental, trending: Support::Experimental, broadcast_rtmp: Support::Experimental, ..Capabilities::NONE }
+        let e = Support::Experimental;
+        Capabilities { profile: e, search: e, videos: e, trending: e, live_events: e, chat: e, gift: e, like: e, follow: e, share: e, viewer_count: e, ..Capabilities::NONE }
     }
     async fn authenticate(&self, _c: &Credentials) -> Result<AuthState, AdapterError> {
         Ok(AuthState::Anonymous)
@@ -221,7 +246,11 @@ impl PlatformAdapter for LikeeAdapter {
     async fn profile(&self, handle: &str, _c: &Credentials) -> Result<Profile, AdapterError> {
         LikeeClient::new(None)?.find_creator(handle).await
     }
-    async fn open_live(&self, _t: &LiveTarget, _c: &Credentials, _cancel: CancellationToken) -> Result<Box<dyn LiveSession>, AdapterError> {
-        Err(AdapterError::Unsupported("Likee LIVE chat/gift events have no validated protocol; see docs/platforms.md".into()))
+    /// Setting `share_url`: the LIVE share link from the Likee app (a new link per LIVE).
+    async fn open_live(&self, t: &LiveTarget, _c: &Credentials, cancel: CancellationToken) -> Result<Box<dyn LiveSession>, AdapterError> {
+        let url = t.settings.get("share_url").ok_or_else(|| AdapterError::NotFound("set `share_url` to the LIVE share link from the Likee app".into()))?;
+        let client = LikeeClient::new(t.settings.get("proxy").map(String::as_str))?;
+        let room = client.live_room(url).await?;
+        Ok(Box::new(live::LikeeSession::connect(t, room, cancel).await?))
     }
 }

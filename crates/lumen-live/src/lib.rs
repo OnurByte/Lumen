@@ -17,7 +17,7 @@ pub mod ratelimit;
 pub mod secret;
 pub mod supervisor;
 
-pub use adapter::{AdapterError, LiveSession, LiveTarget, PlatformAdapter, Profile};
+pub use adapter::{AdapterError, BroadcastEndpoint, LiveSession, LiveTarget, PlatformAdapter, Profile};
 pub use event::{EventKind, LiveEvent, LiveUser};
 pub use manager::LiveManager;
 pub use health::{ConnectionState, HealthSnapshot, SharedHealth};

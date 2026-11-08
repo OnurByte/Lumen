@@ -3,13 +3,15 @@ use crate::session::KwaiSession;
 use async_trait::async_trait;
 use lumen_live::adapter::AuthState;
 use lumen_live::event::stable_hash;
-use lumen_live::{AdapterError, Capabilities, Credentials, LiveSession, LiveTarget, Platform, PlatformAdapter, Profile, Support};
+use lumen_live::{AdapterError, BroadcastEndpoint, Capabilities, Credentials, LiveSession, LiveTarget, Platform, PlatformAdapter, Profile, Support};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 /// Kwai GLOBAL adapter. Reads LIVE events anonymously (`attach: unlogin`), so no credentials
 /// are needed; each account still gets its own device id, HTTP client and socket.
-/// Settings: `device_id`, `api_host`, `socket` (host:port), `proxy`, `watch` (another creator).
+/// Settings: `device_id`, `api_host`, `socket` (host:port), `proxy`, `watch` (another creator),
+/// and for broadcasting `studio_cover` (jpg/png ≤ 2 MB, 720×1280 recommended), `studio_caption`, `studio_host`.
+/// Credential for broadcasting: `studio_cookie` (Cookie header of a logged-in studio.kwai.com session).
 #[derive(Debug, Default, Clone)]
 pub struct KwaiAdapter;
 
@@ -41,6 +43,8 @@ impl PlatformAdapter for KwaiAdapter {
             share: Support::Experimental,
             follow: Support::Unsupported,
             broadcast_rtmp: Support::Experimental,
+            // Kwai Studio flow ported from studio.kwai.com's own JS; not yet run with a real account.
+            broadcast_provision: Support::Experimental,
             ..Capabilities::NONE
         }
     }
@@ -52,6 +56,17 @@ impl PlatformAdapter for KwaiAdapter {
         let json = api.search_user(handle).await?;
         parse_profile(&json, handle)
     }
+    async fn provision_broadcast(&self, target: &LiveTarget, credentials: &Credentials) -> Result<BroadcastEndpoint, AdapterError> {
+        let (bytes, kind) = cover(target)?;
+        let caption = target.settings.get("studio_caption").map_or("", String::as_str);
+        studio(target, credentials)?.create_room(caption, bytes, kind).await
+    }
+    async fn start_broadcast(&self, target: &LiveTarget, credentials: &Credentials, endpoint: &BroadcastEndpoint) -> Result<(), AdapterError> {
+        studio(target, credentials)?.start_live(room_id(endpoint)?).await
+    }
+    async fn stop_broadcast(&self, target: &LiveTarget, credentials: &Credentials, endpoint: &BroadcastEndpoint) -> Result<(), AdapterError> {
+        studio(target, credentials)?.stop_live(room_id(endpoint)?).await
+    }
     async fn open_live(&self, target: &LiveTarget, _credentials: &Credentials, cancel: CancellationToken) -> Result<Box<dyn LiveSession>, AdapterError> {
         let api = api_for(target)?;
         let handle = target.settings.get("watch").unwrap_or(&target.handle);
@@ -59,6 +74,26 @@ impl PlatformAdapter for KwaiAdapter {
         let ticket = api.start_play(&room).await?;
         Ok(Box::new(KwaiSession::connect(&api, target, room, ticket, target.settings.get("socket").map(String::as_str), cancel).await?))
     }
+}
+
+fn studio(target: &LiveTarget, credentials: &Credentials) -> Result<crate::studio::StudioClient, AdapterError> {
+    let cookie = credentials.get("studio_cookie").ok_or_else(|| AdapterError::Auth("add a `studio_cookie` credential (log in at studio.kwai.com, copy the Cookie header)".into()))?;
+    crate::studio::StudioClient::new(target.settings.get("studio_host").map_or(crate::studio::DEFAULT_HOST, String::as_str), cookie, target.settings.get("proxy").map(String::as_str))
+}
+
+fn cover(target: &LiveTarget) -> Result<(Vec<u8>, &'static str), AdapterError> {
+    let path = target.settings.get("studio_cover").ok_or_else(|| AdapterError::Unsupported("set `studio_cover` to a jpg/png cover image (Kwai requires one)".into()))?;
+    let lower = path.to_ascii_lowercase();
+    let kind = if lower.ends_with(".png") { "image/png" } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") { "image/jpeg" } else { return Err(AdapterError::Unsupported("studio_cover must be .jpg or .png".into())) };
+    let bytes = std::fs::read(path).map_err(|e| AdapterError::Unsupported(format!("cannot read studio_cover: {e}")))?;
+    if bytes.len() > 2 * 1024 * 1024 {
+        return Err(AdapterError::Unsupported("studio_cover must be at most 2 MB".into()));
+    }
+    Ok((bytes, kind))
+}
+
+fn room_id(endpoint: &BroadcastEndpoint) -> Result<&str, AdapterError> {
+    endpoint.room_id.as_deref().ok_or_else(|| AdapterError::Protocol("Kwai broadcast without a Studio room id".into()))
 }
 
 pub fn parse_profile(json: &Value, handle: &str) -> Result<Profile, AdapterError> {

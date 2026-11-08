@@ -103,6 +103,8 @@ pub struct Capabilities {
     pub viewer_count: Support,
     /// Pushing video to the platform via RTMP(S) using a user-supplied, authorized ingest key.
     pub broadcast_rtmp: Support,
+    /// Obtaining the ingest URL/key (and starting/stopping the LIVE) through the platform itself.
+    pub broadcast_provision: Support,
 }
 
 impl Capabilities {
@@ -120,8 +122,9 @@ impl Capabilities {
         share: Support::Unsupported,
         viewer_count: Support::Unsupported,
         broadcast_rtmp: Support::Unsupported,
+        broadcast_provision: Support::Unsupported,
     };
-    pub fn rows(&self) -> [(&'static str, Support); 13] {
+    pub fn rows(&self) -> [(&'static str, Support); 14] {
         [
             ("profile", self.profile),
             ("search", self.search),
@@ -136,6 +139,7 @@ impl Capabilities {
             ("share", self.share),
             ("viewer_count", self.viewer_count),
             ("broadcast_rtmp", self.broadcast_rtmp),
+            ("broadcast_provision", self.broadcast_provision),
         ]
     }
 }

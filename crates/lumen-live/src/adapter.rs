@@ -94,6 +94,15 @@ pub enum AuthState {
     Verified,
 }
 
+/// Where to push video for one broadcast, as issued by the platform (or entered by the operator).
+#[derive(Debug, Clone)]
+pub struct BroadcastEndpoint {
+    pub ingest_url: String,
+    pub stream_key: crate::secret::SecretString,
+    /// Platform room/session id needed to start or stop the broadcast, if any.
+    pub room_id: Option<String>,
+}
+
 /// An open LIVE connection. Dropping it must close the underlying socket.
 #[async_trait]
 pub trait LiveSession: Send {
@@ -116,6 +125,21 @@ pub trait PlatformAdapter: Send + Sync + 'static {
         credentials: &Credentials,
         cancel: CancellationToken,
     ) -> Result<Box<dyn LiveSession>, AdapterError>;
+    /// Ask the platform for an ingest endpoint for this account (e.g. Kwai Studio creates a room
+    /// and returns its push URL). Platforms where the operator copies the key by hand return
+    /// `Unsupported`; their stored `ingest_url` + `stream_key` are used instead.
+    async fn provision_broadcast(&self, _target: &LiveTarget, _credentials: &Credentials) -> Result<BroadcastEndpoint, AdapterError> {
+        Err(AdapterError::Unsupported(format!("{}: copy the server URL and stream key from the platform's own tools", self.platform())))
+    }
+    /// Tell the platform the stream is flowing and the LIVE should start (no-op where pushing
+    /// video starts the LIVE by itself).
+    async fn start_broadcast(&self, _target: &LiveTarget, _credentials: &Credentials, _endpoint: &BroadcastEndpoint) -> Result<(), AdapterError> {
+        Ok(())
+    }
+    /// End the platform-side LIVE (no-op where stopping the push ends it).
+    async fn stop_broadcast(&self, _target: &LiveTarget, _credentials: &Credentials, _endpoint: &BroadcastEndpoint) -> Result<(), AdapterError> {
+        Ok(())
+    }
     /// Silence after which a connection is considered stale.
     fn stale_after(&self) -> Duration {
         Duration::from_secs(90)

@@ -39,7 +39,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "cookies"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "cookies", "multipart"] }
 prost = "0.14"
 rand = "0.9"
 zeroize = { version = "1", features = ["derive"] }

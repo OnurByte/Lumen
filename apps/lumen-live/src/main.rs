@@ -20,8 +20,9 @@ ACCOUNTS
   accounts list [--group G]          accounts show REF        accounts remove REF
   accounts rename REF NAME           accounts group REF [G]   accounts use REF
   accounts enable REF | disable REF  accounts live REF on|off
-  accounts set REF KEY [VALUE]       (non-secret settings: watch, proxy, region, language, device_id, socket)
-  accounts secret REF NAME           (reads the value from stdin; e.g. cookie, stream_key)
+  accounts set REF KEY [VALUE]       (settings: watch, proxy, region, language, device_id, socket,
+                                      share_url (Likee LIVE link), studio_cover, studio_caption (Kwai Studio))
+  accounts secret REF NAME           (reads the value from stdin: cookie, stream_key, studio_cookie)
   accounts broadcast REF --ingest rtmps://… [--video-kbps N] [--audio-kbps N]
   accounts authorize-broadcast REF --confirm   |   accounts revoke-broadcast REF
   accounts broadcast-on REF | broadcast-off REF
@@ -32,7 +33,8 @@ RUN
   broadcast --scene NAME [--listen 127.0.0.1:9100] [--ffmpeg PATH]
 LOOKUPS
   profile PLATFORM HANDLE      capabilities
-  likee videos CREATOR_ID | trending [COUNTRY] | hashtags [COUNTRY] | hashtag ID [COUNTRY] | comments VIDEO_ID
+  likee search KEYWORD [COUNTRY] | user UID | videos CREATOR_ID | trending [COUNTRY] | hashtags [COUNTRY]
+        | hashtag ID [COUNTRY] | comments VIDEO_ID
 
 REF is an account label, id or unique id prefix. Data lives in $LUMEN_HOME (default ~/.local/share/lumen).";
 
@@ -268,6 +270,7 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
     let listen = a.flag("--listen").unwrap_or_else(|| "127.0.0.1:9100".into());
     let ffmpeg = a.flag("--ffmpeg").unwrap_or_else(|| "ffmpeg".into());
     let mut destinations = Vec::new();
+    let mut provisioned = Vec::new();
     for id in &scene.destinations {
         let acct = c.get(id).await.map_err(|e| e.to_string())?;
         let b = &acct.broadcast;
@@ -276,9 +279,23 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
         if !acct.enabled { skip("account disabled"); continue; }
         if !b.authorized { skip("not authorized for broadcasting (accounts authorize-broadcast)"); continue; }
         if !b.enabled { skip("broadcast is off (accounts broadcast-on)"); continue; }
-        let Some(ingest) = b.ingest_url.clone() else { skip("no ingest URL"); continue; };
         let creds = c.credentials(id).await.map_err(|e| e.to_string())?;
-        let Some(key) = creds.get("stream_key").cloned() else { skip("no stream_key credential"); continue; };
+        // A key the operator entered wins; otherwise ask the platform for one (Kwai Studio).
+        let (ingest, key) = match (b.ingest_url.clone(), creds.get("stream_key").cloned()) {
+            (Some(ingest), Some(key)) => (ingest, key),
+            _ => {
+                let target = acct.live_target();
+                match adapter(acct.platform).provision_broadcast(&target, &creds).await {
+                    Ok(ep) => {
+                        println!("{}: {} issued an ingest endpoint ({})", acct.label, acct.platform, ep.ingest_url);
+                        let out = (ep.ingest_url.clone(), ep.stream_key.clone());
+                        provisioned.push((acct.label.clone(), target, creds.clone(), ep));
+                        out
+                    }
+                    Err(e) => { skip(&format!("no ingest URL + stream_key, and the platform could not issue one: {e}")); continue; }
+                }
+            }
+        };
         destinations.push(Destination { account_id: acct.id.clone(), label: acct.label.clone(), platform: acct.platform, ingest_url: ingest, stream_key: key, video_kbps: b.video_bitrate_kbps, audio_kbps: b.audio_bitrate_kbps });
     }
     if destinations.is_empty() {
@@ -291,13 +308,36 @@ async fn broadcast(mut a: Args) -> Result<(), String> {
     println!("send MPEG-TS to tcp://{listen} (OBS: Settings → Output → Recording → Custom Output (FFmpeg), output to URL, container mpegts)");
     let cancel = CancellationToken::new();
     let relay = lumen_broadcast::start(listener, destinations, ffmpeg, cancel.clone());
+    // Platform-side "go live" for provisioned rooms, once their video is actually flowing.
+    let mut pending: Vec<_> = provisioned.iter().collect();
     let mut tick = tokio::time::interval(Duration::from_secs(10));
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
-            _ = tick.tick() => for h in relay.snapshot() {
-                println!("dest {:<20} {:<12} {:?} starts={} sent={}KiB err={}", h.label, h.platform.as_str(), h.state, h.starts, h.bytes_sent / 1024, h.last_error.as_deref().unwrap_or("-"));
-            },
+            _ = tick.tick() => {
+                let snapshot = relay.snapshot();
+                for h in &snapshot {
+                    println!("dest {:<20} {:<12} {:?} starts={} sent={}KiB err={}", h.label, h.platform.as_str(), h.state, h.starts, h.bytes_sent / 1024, h.last_error.as_deref().unwrap_or("-"));
+                }
+                let mut still = Vec::new();
+                for p in pending {
+                    let (label, target, creds, ep) = p;
+                    let flowing = snapshot.iter().any(|h| &h.label == label && h.bytes_sent > 512 * 1024);
+                    if !flowing { still.push(p); continue; }
+                    match adapter(target.platform).start_broadcast(target, creds, ep).await {
+                        Ok(()) => println!("{label}: LIVE started on {}", target.platform),
+                        Err(e) if e.is_retryable() => { println!("{label}: not started yet ({e}); retrying"); still.push(p); }
+                        Err(e) => println!("{label}: could not start LIVE: {e}"),
+                    }
+                }
+                pending = still;
+            }
+        }
+    }
+    for (label, target, creds, ep) in &provisioned {
+        match adapter(target.platform).stop_broadcast(target, creds, ep).await {
+            Ok(()) => println!("{label}: LIVE stopped"),
+            Err(e) => println!("{label}: stop failed, end it in the platform's own tools: {e}"),
         }
     }
     cancel.cancel();
@@ -317,6 +357,8 @@ async fn likee(mut a: Args) -> Result<(), String> {
         "trending" => show(cl.trending_videos(&country(&mut a), "en", 0, 30).await),
         "hashtags" => show(cl.trending_hashtags(&country(&mut a), "en", 1, 50).await),
         "hashtag" => { let id = a.need("HASHTAG_ID")?; show(cl.hashtag_videos(&id, &country(&mut a), 1, 30).await) }
+        "search" => show(cl.search_users(&a.need("KEYWORD")?, 20, &country(&mut a)).await),
+        "user" => show(cl.user_info(&a.need("UID")?).await),
         "comments" => show(cl.video_comments(&a.need("VIDEO_ID")?, "en", "0", 49).await),
         other => Err(format!("unknown likee subcommand '{other}'")),
     }

@@ -25,9 +25,12 @@ fn parses_reference_shaped_fixtures() {
 }
 
 #[tokio::test]
-async fn live_events_are_reported_unsupported() {
+async fn live_requires_a_likee_share_link() {
     let a = LikeeAdapter;
-    assert_eq!(a.capabilities().live_events, lumen_live::Support::Unsupported);
-    let t = LiveTarget { account_id: AccountId("a".into()), platform: Platform::LikeeGlobal, handle: "x".into(), settings: Default::default() };
-    assert!(matches!(a.open_live(&t, &Credentials::new(), Default::default()).await, Err(AdapterError::Unsupported(_))));
+    assert_eq!(a.capabilities().live_events, lumen_live::Support::Experimental);
+    let mut t = LiveTarget { account_id: AccountId("a".into()), platform: Platform::LikeeGlobal, handle: "x".into(), settings: Default::default() };
+    assert!(matches!(a.open_live(&t, &Credentials::new(), Default::default()).await, Err(AdapterError::NotFound(_))));
+    t.settings.insert("share_url".into(), "https://evil.example/x".into());
+    assert!(matches!(a.open_live(&t, &Credentials::new(), Default::default()).await, Err(AdapterError::NotFound(_))));
+    assert!(matches!(a.provision_broadcast(&t, &Credentials::new()).await, Err(AdapterError::Unsupported(_))));
 }
