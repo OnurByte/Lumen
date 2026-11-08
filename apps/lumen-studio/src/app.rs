@@ -1381,7 +1381,7 @@ impl LumenApp {
                     div()
                         .flex()
                         .gap_2()
-                        .child(chip(SharedString::from(format!("acct-use-{i}")), "Make active", a.active).on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Use(use_id.clone())), cx))))
+                        .child(chip(SharedString::from(format!("acct-use-{i}")), if a.active { "Active" } else { "Make active" }, a.active).on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Use(use_id.clone())), cx))))
                         .child(chip(SharedString::from(format!("acct-live-{i}")), if live { "LIVE events on" } else { "LIVE events off" }, live).on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Live(live_id.clone(), !live)), cx))))
                         .child(if a.authorized {
                             chip(SharedString::from(format!("acct-bc-{i}")), if broadcast { "Broadcast on" } else { "Broadcast off" }, broadcast).on_click(cx.listener(move |app, _, _, cx| app.accounts_op(Some(Op::Broadcast(bc_id.clone(), !broadcast)), cx)))
