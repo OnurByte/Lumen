@@ -618,6 +618,7 @@ fn kit_theme(cx: &mut App) {
 }
 
 fn main() {
+    lumen_protocol::prepare_environment();
     let mut only = None;
     let mut socket = None;
     for arg in std::env::args().skip(1) {

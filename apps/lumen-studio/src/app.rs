@@ -16,7 +16,6 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
 };
 use std::{
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::Duration,
@@ -147,7 +146,7 @@ fn daemon_binary() -> PathBuf {
     }
     std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|d| d.join("lumend")))
+        .and_then(|exe| exe.parent().map(|d| d.join(format!("lumend{}", std::env::consts::EXE_SUFFIX))))
         .filter(|p| p.is_file())
         .unwrap_or_else(|| PathBuf::from("lumend"))
 }
@@ -470,8 +469,11 @@ impl LumenApp {
     fn spawn(&self, pack: &Path) -> Result<Child, String> {
         let dir = self.socket.parent().ok_or("invalid socket path")?;
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        }
         let _ = std::fs::remove_file(&self.socket);
         let state = state_dir();
         std::fs::create_dir_all(&state).map_err(|e| e.to_string())?;
@@ -506,8 +508,9 @@ impl LumenApp {
         }
         // If the app dies without running its destructors (signal, crash), take lumend with it.
         // SAFETY: prctl is async-signal-safe and touches no Rust state between fork and exec.
+        #[cfg(target_os = "linux")]
         unsafe {
-            use std::os::unix::process::CommandExt;
+            use std::os::unix::process::CommandExt as _;
             command.pre_exec(|| {
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
                 Ok(())
@@ -598,7 +601,7 @@ fn pack_name(path: &Path) -> String {
 /// True when the `codex` CLI that AI rehearsals use is on PATH.
 fn codex_available() -> bool {
     std::env::var_os("LUMEN_CODEX_BIN").is_some()
-        || std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| d.join("codex").is_file()))
+        || std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| d.join(if cfg!(windows) { "codex.cmd" } else { "codex" }).is_file()))
 }
 
 // ---------------------------------------------------------------------------------------

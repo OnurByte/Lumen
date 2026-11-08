@@ -315,7 +315,7 @@ pub fn run_avatars(raw: &[String]) -> Result<(), String> {
     if dirs.is_empty() {
         return Err(format!("no avatar.toml under {}", input.display()));
     }
-    let program = std::env::var_os("LUMEN_CODEX_BIN").map_or_else(|| "codex".into(), PathBuf::from);
+    let program = std::env::var_os("LUMEN_CODEX_BIN").map_or_else(|| if cfg!(windows) { "codex.cmd" } else { "codex" }.into(), PathBuf::from);
     let mut failed = Vec::new();
     for dir in &dirs {
         eprintln!("avatar {}", dir.display());

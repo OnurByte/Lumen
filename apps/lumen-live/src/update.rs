@@ -8,6 +8,7 @@ const REPOSITORY: &str = "OnurByte/Lumen";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PREVIOUS_DIR: &str = ".lumen-previous";
 const BINARIES: [&str; 4] = ["lumend", "lumen-studio", "lumen-live", "lumen"];
+const INSTALLER: &str = if cfg!(windows) { "install.ps1" } else { "install.sh" };
 
 /// `v1.2.3` or `1.2.3`; a pre-release suffix is ignored.
 pub fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
@@ -70,7 +71,7 @@ pub async fn install() -> Result<String, String> {
     if status["available"] != true {
         return Ok(format!("You already have the latest version ({VERSION})."));
     }
-    let url = format!("https://raw.githubusercontent.com/{REPOSITORY}/{tag}/install.sh");
+    let url = format!("https://raw.githubusercontent.com/{REPOSITORY}/{tag}/{INSTALLER}");
     let response = client()?.get(&url).send().await.map_err(|_| "Could not download the installer.".to_string())?;
     if !response.status().is_success() {
         return Err(format!("GitHub answered {} for the installer.", response.status()));
@@ -79,9 +80,16 @@ pub async fn install() -> Result<String, String> {
     if script.len() > 256 * 1024 {
         return Err("The installer is unexpectedly large.".into());
     }
-    let path = std::env::temp_dir().join(format!("lumen-install-{}.sh", std::process::id()));
+    let path = std::env::temp_dir().join(format!("lumen-install-{}-{INSTALLER}", std::process::id()));
     tokio::fs::write(&path, &script).await.map_err(|e| e.to_string())?;
-    let result = tokio::process::Command::new("sh").arg(&path).env("LUMEN_VERSION", &tag).env("LUMEN_BIN_DIR", binary_dir()?).env("LUMEN_NO_DEPS", "1").status().await;
+    let mut command = if cfg!(windows) {
+        let mut shell = tokio::process::Command::new("powershell");
+        shell.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
+        shell
+    } else {
+        tokio::process::Command::new("sh")
+    };
+    let result = command.arg(&path).env("LUMEN_VERSION", &tag).env("LUMEN_BIN_DIR", binary_dir()?).env("LUMEN_NO_DEPS", "1").status().await;
     let _ = tokio::fs::remove_file(&path).await;
     match result {
         Ok(s) if s.success() => Ok(format!("Updated to Lumen {tag}. Restart Lumen to use it.")),
@@ -95,12 +103,20 @@ pub fn rollback() -> Result<String, String> {
     let previous = dir.join(PREVIOUS_DIR);
     let mut restored = 0;
     for name in BINARIES {
-        let kept = previous.join(name);
+        let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+        let kept = previous.join(&file);
         if kept.is_file() {
             // Copy beside the target, then rename: a running copy keeps working.
-            let staged = dir.join(format!(".{name}.rollback"));
+            let staged = dir.join(format!(".{file}.rollback"));
             std::fs::copy(&kept, &staged).map_err(|e| e.to_string())?;
-            std::fs::rename(&staged, dir.join(name)).map_err(|e| e.to_string())?;
+            let target = dir.join(&file);
+            if cfg!(windows) && target.exists() {
+                // A running .exe cannot be replaced, but it can be renamed aside.
+                let aside = dir.join(format!(".{file}.old"));
+                let _ = std::fs::remove_file(&aside);
+                std::fs::rename(&target, aside).map_err(|e| e.to_string())?;
+            }
+            std::fs::rename(&staged, target).map_err(|e| e.to_string())?;
             restored += 1;
         }
     }

@@ -6256,7 +6256,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-live-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-util",
  "lumen-accounts",
@@ -6265,6 +6265,7 @@ dependencies = [
  "lumen-platform-kwai",
  "lumen-platform-likee",
  "lumen-platform-tiktok",
+ "lumen-protocol",
  "reqwest",
  "serde",
  "serde_json",
@@ -6373,7 +6374,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-studio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -6411,7 +6412,7 @@ dependencies = [
 
 [[package]]
 name = "lumend"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lumen-audience",
  "lumen-debate",
@@ -6424,6 +6425,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 1.2.1+spec-1.1.0",
+ "uuid",
 ]
 
 [[package]]

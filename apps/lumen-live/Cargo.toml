@@ -1,6 +1,6 @@
 [package]
 name = "lumen-live-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 
@@ -9,6 +9,7 @@ name = "lumen-live"
 path = "src/main.rs"
 
 [dependencies]
+lumen-protocol = { path = "../../crates/lumen-protocol" }
 lumen-live = { path = "../../crates/lumen-live" }
 lumen-accounts = { path = "../../crates/lumen-accounts" }
 lumen-broadcast = { path = "../../crates/lumen-broadcast" }

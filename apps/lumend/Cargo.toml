@@ -1,8 +1,9 @@
 [package]
 name = "lumend"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 [dependencies]
+uuid = { workspace = true }
 serde_json = "1"
 lumen-voice = { path = "../../crates/lumen-voice" }
 tokio-util = "0.7"

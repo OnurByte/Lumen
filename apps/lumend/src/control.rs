@@ -6,7 +6,6 @@ use lumen_protocol::{
 use lumen_storage::Journal;
 use std::{
     io,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex as StdMutex,
@@ -16,9 +15,12 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixListener, UnixStream},
     sync::{Mutex, Notify, Semaphore},
 };
+#[cfg(windows)]
+use tokio::net::{TcpListener as Listener, TcpStream as Stream};
+#[cfg(unix)]
+use tokio::net::{UnixListener as Listener, UnixStream as Stream};
 use tokio_util::sync::CancellationToken;
 
 pub struct Hub {
@@ -97,18 +99,8 @@ impl Drop for SocketGuard {
 }
 
 pub async fn serve(socket: &Path, database: &Path, show: Option<Show>) -> Result<(), String> {
-    let parent = socket
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .ok_or("socket requires a private parent directory")?;
-    let metadata = std::fs::metadata(parent).map_err(|e| e.to_string())?;
-    if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
-        return Err("socket parent must be a private directory (mode 0700)".into());
-    }
-    let listener = UnixListener::bind(socket).map_err(|e| e.to_string())?;
+    let (listener, token) = bind(socket).await?;
     let _guard = SocketGuard(socket.to_owned());
-    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
-        .map_err(|e| e.to_string())?;
     let journal = Arc::new(Journal::open(database).await.map_err(|e| e.to_string())?);
     let hub = Arc::new(Hub::new(show.is_some()));
     let show = show
@@ -131,10 +123,11 @@ pub async fn serve(socket: &Path, database: &Path, show: Option<Show>) -> Result
         };
         let hub = hub.clone();
         let journal = journal.clone();
+        let token = token.clone();
         tokio::spawn(async move {
             let _permit = permit;
             let _ =
-                tokio::time::timeout(Duration::from_secs(2), handle(stream, hub, journal)).await;
+                tokio::time::timeout(Duration::from_secs(2), handle(stream, hub, journal, token)).await;
         });
     }
     hub.shutdown.cancel();
@@ -148,7 +141,40 @@ pub async fn serve(socket: &Path, database: &Path, show: Option<Show>) -> Result
     Ok(())
 }
 
-async fn handle(mut stream: UnixStream, hub: Arc<Hub>, journal: Arc<Journal>) -> io::Result<()> {
+#[cfg(unix)]
+async fn bind(socket: &Path) -> Result<(Listener, String), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let parent = socket
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or("socket requires a private parent directory")?;
+    let metadata = std::fs::metadata(parent).map_err(|e| e.to_string())?;
+    if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
+        return Err("socket parent must be a private directory (mode 0700)".into());
+    }
+    let listener = Listener::bind(socket).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    Ok((listener, String::new()))
+}
+
+/// Loopback plus a random token in a file only this user can read (see `lumen_protocol`).
+#[cfg(windows)]
+async fn bind(socket: &Path) -> Result<(Listener, String), String> {
+    let listener = Listener::bind(("127.0.0.1", 0)).await.map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    std::fs::write(socket, format!("{port} {token}")).map_err(|e| e.to_string())?;
+    Ok((listener, token))
+}
+
+async fn handle(mut stream: Stream, hub: Arc<Hub>, journal: Arc<Journal>, token: String) -> io::Result<()> {
+    if !token.is_empty() {
+        let mut sent = vec![0; token.len()];
+        stream.read_exact(&mut sent).await?;
+        if sent != token.as_bytes() {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "bad token"));
+        }
+    }
     let mut header = [0; 4];
     stream.read_exact(&mut header).await?;
     let length = u32::from_be_bytes(header) as usize;
@@ -256,7 +282,7 @@ async fn handle(mut stream: UnixStream, hub: Arc<Hub>, journal: Arc<Journal>) ->
     respond(&mut stream, &hub, response).await
 }
 
-async fn respond(stream: &mut UnixStream, hub: &Hub, mut response: Response) -> io::Result<()> {
+async fn respond(stream: &mut Stream, hub: &Hub, mut response: Response) -> io::Result<()> {
     response.stage = hub
         .stage
         .lock()

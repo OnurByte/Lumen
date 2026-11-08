@@ -251,9 +251,43 @@ pub fn request(
     command: Command,
     timeout: std::time::Duration,
 ) -> io::Result<Response> {
-    let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+    let mut stream = connect(path)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
     write_frame(&mut stream, &Envelope::command(command))?;
     read_response(&mut stream)
+}
+
+#[cfg(unix)]
+fn connect(path: &std::path::Path) -> io::Result<std::os::unix::net::UnixStream> {
+    std::os::unix::net::UnixStream::connect(path)
+}
+
+/// Windows has no usable Unix sockets here: the runtime listens on loopback and writes
+/// "PORT TOKEN" to `path` (inside the user's own temp folder). Clients send the token first.
+#[cfg(windows)]
+fn connect(path: &std::path::Path) -> io::Result<std::net::TcpStream> {
+    use std::io::Write as _;
+    let text = std::fs::read_to_string(path)?;
+    let (port, token) = text.trim().split_once(' ').ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad endpoint file"))?;
+    let port: u16 = port.parse().map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad endpoint port"))?;
+    let mut stream = std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))?;
+    stream.write_all(token.as_bytes())?;
+    Ok(stream)
+}
+
+/// Windows has no HOME or XDG_RUNTIME_DIR, which every Lumen path starts from.
+pub fn prepare_environment() {
+    #[cfg(windows)]
+    // SAFETY: called first thing in `main`, before anything reads the environment.
+    unsafe {
+        if std::env::var_os("HOME").is_none()
+            && let Some(profile) = std::env::var_os("USERPROFILE")
+        {
+            std::env::set_var("HOME", profile);
+        }
+        if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
+            std::env::set_var("XDG_RUNTIME_DIR", std::env::temp_dir());
+        }
+    }
 }

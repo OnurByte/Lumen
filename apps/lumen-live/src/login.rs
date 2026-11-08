@@ -4,7 +4,6 @@
 use futures_util::{SinkExt, StreamExt};
 use lumen_live::{LiveTarget, LoginSpec, PlatformAdapter, SecretString, SessionCapture};
 use serde_json::{Value, json};
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -15,6 +14,19 @@ const BROWSERS: &[&str] = &["chromium", "google-chrome-stable", "google-chrome",
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 
 fn find_browser() -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    for app in ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge"] {
+        let bin = PathBuf::from(format!("/Applications/{app}.app/Contents/MacOS/{app}"));
+        if bin.is_file() {
+            return Ok(bin);
+        }
+    }
+    #[cfg(windows)]
+    for bin in [r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"] {
+        if Path::new(bin).is_file() {
+            return Ok(bin.into());
+        }
+    }
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path)
         .flat_map(|dir| BROWSERS.iter().map(move |b| dir.join(b)))
@@ -101,7 +113,11 @@ pub async fn capture(adapter: &dyn PlatformAdapter, target: &LiveTarget, spec: &
     let bin = browser.map_or_else(find_browser, |b| Ok(PathBuf::from(b)))?;
     let profile = ProfileDir(home.join(format!("login-{}", std::process::id())));
     let _ = std::fs::remove_dir_all(&profile.0);
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&profile.0).map_err(|e| format!("cannot create login profile: {e}"))?;
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(&profile.0).map_err(|e| format!("cannot create login profile: {e}"))?;
     let mut child = tokio::process::Command::new(&bin)
         .arg("--remote-debugging-port=0")
         .arg(format!("--user-data-dir={}", profile.0.display()))

@@ -31,7 +31,7 @@ pub fn set_onboarded() -> Result<(), String> {
 
 /// `lumen-live` beside this binary, else from PATH. It owns the network and installer code.
 pub fn lumen_live() -> PathBuf {
-    std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("lumen-live"))).filter(|p| p.is_file()).unwrap_or_else(|| "lumen-live".into())
+    std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join(format!("lumen-live{}", std::env::consts::EXE_SUFFIX)))).filter(|p| p.is_file()).unwrap_or_else(|| "lumen-live".into())
 }
 
 /// The display name of a show file; its file name if it has none.

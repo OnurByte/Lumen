@@ -483,6 +483,7 @@ async fn run() -> Result<(), String> {
 
 #[tokio::main]
 async fn main() {
+    lumen_protocol::prepare_environment();
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into())).with_writer(std::io::stderr).init();
     if let Err(e) = run().await {
         eprintln!("{e}");

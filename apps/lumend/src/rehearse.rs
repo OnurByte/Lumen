@@ -12,7 +12,6 @@ use lumen_voice::{
     worker::{VoiceCapabilities, VoiceHealth, VoiceProvider, VoiceRequest},
 };
 use std::{
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
@@ -240,8 +239,12 @@ pub async fn run(args: &[String]) -> Result<(), String> {
     let dir = default_runtime_dir();
     if socket.is_none() || journal.is_none() {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
             .map_err(|e| e.to_string())?;
+        }
     }
     let socket = socket.unwrap_or_else(|| dir.join("control.sock"));
     let journal = journal.unwrap_or_else(|| dir.join("rehearsal.sqlite"));

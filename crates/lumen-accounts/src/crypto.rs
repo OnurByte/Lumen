@@ -37,16 +37,21 @@ impl MasterKey {
 
     /// Load the key from `path`, creating a fresh random key (mode 0600) if missing.
     pub fn load_or_create(path: &Path) -> Result<Self, CryptoError> {
+        #[cfg(unix)]
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
+            #[cfg(unix)]
             let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
         }
         match fs::metadata(path) {
             Ok(meta) => {
+                #[cfg(unix)]
                 if meta.permissions().mode() & 0o077 != 0 {
                     return Err(CryptoError::InsecurePermissions);
                 }
+                #[cfg(windows)]
+                let _ = meta;
                 let bytes = Zeroizing::new(fs::read(path)?);
                 let arr: [u8; 32] = bytes.as_slice().try_into().map_err(|_| CryptoError::BadKeyLength)?;
                 Ok(Self::from_bytes(arr))
@@ -54,7 +59,11 @@ impl MasterKey {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let mut bytes = Zeroizing::new([0u8; 32]);
                 rand::fill(&mut bytes[..]);
-                let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
+                let mut options = fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                options.mode(0o600);
+                let mut file = options.open(path)?;
                 file.write_all(&bytes[..])?;
                 file.sync_all()?;
                 Ok(Self::from_bytes(*bytes))
@@ -107,6 +116,7 @@ mod tests {
         assert!(matches!(other.open(k.id(), &n, &c, b"acct-1|tiktok"), Err(CryptoError::WrongKey)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn key_file_created_private_and_reloaded() {
         use std::os::unix::fs::PermissionsExt;

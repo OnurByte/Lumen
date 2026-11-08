@@ -22,7 +22,7 @@ pub struct CodexModel {
 impl CodexModel {
     pub fn new(name: &str, model: &str, max_tokens: u16) -> Self {
         let program =
-            std::env::var_os("LUMEN_CODEX_BIN").map_or_else(|| "codex".into(), PathBuf::from);
+            std::env::var_os("LUMEN_CODEX_BIN").map_or_else(|| if cfg!(windows) { "codex.cmd" } else { "codex" }.into(), PathBuf::from);
         Self {
             program,
             name: name.to_owned(),

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="236" viewBox="0 0 960 236" role="img" aria-label="How it works: name your show, ask a question, rehearse, go live">
+<rect x="0.5" y="0.5" width="959" height="235" rx="12" fill="#000000" stroke="#404040"/>
+<text x="32" y="52" font-size="18" font-weight="400" fill="#ffffff" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">How it works</text>
+<svg x="32.0" y="84" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8 H27 M16 8 V26 M11 26 H21"/></g></svg>
+<text x="224.0" y="104" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">01</text>
+<text x="32.0" y="152" font-size="16" font-weight="500" fill="#ffffff" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Name your show</text>
+<text x="32.0" y="180" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Call it anything. Change</text>
+<text x="32.0" y="202" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">it whenever you like.</text>
+<svg x="264.0" y="84" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6 H28 V22 H14 L8 28 V22 H4 Z"/><path d="M12 12 H20 M12 16 H17"/></g></svg>
+<text x="456.0" y="104" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">02</text>
+<text x="264.0" y="152" font-size="16" font-weight="500" fill="#ffffff" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Ask a question</text>
+<text x="264.0" y="180" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Your two hosts take</text>
+<text x="264.0" y="202" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">opposite sides.</text>
+<svg x="496.0" y="84" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="26" height="18" rx="4"/><path d="M13 10 L19 14 L13 18 Z"/><path d="M3 28 H29"/></g></svg>
+<text x="688.0" y="104" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">03</text>
+<text x="496.0" y="152" font-size="16" font-weight="500" fill="#ffffff" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Rehearse</text>
+<text x="496.0" y="180" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Watch it privately. Nothing</text>
+<text x="496.0" y="202" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">goes live until you say so.</text>
+<svg x="728.0" y="84" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="4"/><path d="M9 9 C5 13 5 19 9 23 M23 9 C27 13 27 19 23 23 M5 5 C-1 11 -1 21 5 27 M27 5 C33 11 33 21 27 27"/></g></svg>
+<text x="920.0" y="104" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">04</text>
+<text x="728.0" y="152" font-size="16" font-weight="500" fill="#ffffff" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Go live</text>
+<text x="728.0" y="180" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">Hosts debate on screen</text>
+<text x="728.0" y="202" font-size="14" font-weight="400" fill="#b3b3b3" text-anchor="start" font-family="&quot;Helvetica Neue&quot;, Helvetica, Arial, sans-serif">and answer your viewers.</text>
+</svg>

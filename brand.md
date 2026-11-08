@@ -77,6 +77,10 @@ Adopted from [alphagov/govuk-design-system](https://github.com/alphagov/govuk-de
 - **Ctrl K** (**⌘ K** on Mac) is the one shortcut advertised for moving around. It opens Find. Navigation never prints shortcut hints.
 - The Lumen mark appears in the sidebar, the first-run guide and Info, compiled into the app so it never goes missing.
 
+## Platform and system marks
+
+TikTok, Kwai, Likee, Linux, macOS and Windows marks appear only in the README, in one colour (white on dark, near-black on light), to say what Lumen works with. They belong to their owners. Regenerate them with `assets/readme/generate.py`.
+
 ## Writing
 
 - Address the operator as "you". Say what happened, then what to do next.

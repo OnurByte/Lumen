@@ -16,6 +16,7 @@ mod show;
 
 #[tokio::main]
 async fn main() {
+    lumen_protocol::prepare_environment();
     if let Err(error) = run().await {
         eprintln!("{error}");
         std::process::exit(1);

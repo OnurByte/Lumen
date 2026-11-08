@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2025]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
@@ -25,12 +25,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb1-dev
       - name: Pack archive
+        shell: bash
         run: packaging/release-archive.sh
       - name: Smoke-test the packed CLI
+        shell: bash
         run: |
           mkdir smoke
-          tar -xzf dist/lumen-*.tar.gz -C smoke
-          smoke/lumen/lumen-live --version
+          if [[ -f dist/lumen-windows-x86_64.zip ]]; then
+            7z x -osmoke dist/lumen-windows-x86_64.zip >/dev/null
+            smoke/lumen/lumen-live.exe --version
+          else
+            tar -xzf dist/lumen-*.tar.gz -C smoke
+            smoke/lumen/lumen-live --version
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: archive-${{ matrix.runner }}

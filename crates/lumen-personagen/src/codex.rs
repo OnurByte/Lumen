@@ -44,7 +44,7 @@ impl CodexExec {
     /// `LUMEN_CODEX_BIN` overrides the binary (tests, pinned installs); default `codex`.
     pub fn from_env(model: Option<String>, timeout: Duration) -> Self {
         let program =
-            std::env::var_os("LUMEN_CODEX_BIN").map_or_else(|| "codex".into(), PathBuf::from);
+            std::env::var_os("LUMEN_CODEX_BIN").map_or_else(|| if cfg!(windows) { "codex.cmd" } else { "codex" }.into(), PathBuf::from);
         Self {
             program,
             model,
